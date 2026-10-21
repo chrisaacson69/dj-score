@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
+import numpy as np
+
 from dj_score.domain.model import TrackAnalysis
 
 
@@ -14,3 +16,15 @@ class AnalysisCache(Protocol):
     def load(self, project_dir: Path) -> TrackAnalysis | None: ...
 
     def save(self, analysis: TrackAnalysis, project_dir: Path) -> None: ...
+
+
+class AudioLoader(Protocol):
+    """Decode an audio file to a mono float signal. `adapters.audio.LibrosaLoader`."""
+
+    def load(self, path: Path, sr: int) -> np.ndarray: ...
+
+
+class LufsMeter(Protocol):
+    """Integrated loudness (LUFS), or None when no meter is available. `adapters.loudness`."""
+
+    def integrated_lufs(self, y: np.ndarray, sr: int) -> float | None: ...

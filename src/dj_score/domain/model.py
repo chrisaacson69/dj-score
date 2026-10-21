@@ -44,12 +44,13 @@ class TempoSegment:
 
 @dataclass
 class TempoSpan:
-    """Rolling BPM over `span` beats (camelot's `span_data`)."""
+    """Rolling BPM over `span` beats (camelot's `span_data`). With too few beats
+    for one span, only the empty `times`/`bpms` are set."""
     times: np.ndarray
     bpms: np.ndarray
-    span: int
-    median: float
-    std: float
+    span: int | None = None
+    median: float | None = None
+    std: float | None = None
 
 
 @dataclass
