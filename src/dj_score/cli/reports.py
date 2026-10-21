@@ -108,3 +108,46 @@ def events_report(name, tempo, duration, ev, phrase_bars) -> str:
             out.append(f"{i:>3} {e.bar:>5} {e.time_fmt:>8} {e.score:>6.3f} {p:>4} {e.type or '':<12} {e.description}")
     out.append("")
     return "\n".join(out)
+
+
+def timeline_report(estimate: dict) -> str:
+    """camelot_from_youtube's `format_timeline_human`, over the timeline report JSON."""
+    from dj_score.adapters.plots.timeline import event_label
+    from dj_score.domain.timefmt import format_clock
+
+    lines = []
+    summary = estimate.get("summary", {})
+    dominant = summary.get("dominant", {})
+    if dominant:
+        lines.append(f"Dominant: {dominant.get('camelot')} ({dominant.get('key')}) - "
+                     f"{dominant.get('coverage', 0)*100:.1f}% coverage")
+    bpm, duration = estimate.get("bpm"), estimate.get("duration", 0)
+    if bpm and duration:
+        lines.append(f"Duration: {format_clock(duration)} | BPM: {bpm}")
+
+    key_changes = summary.get("key_changes", [])
+    energy_events = estimate.get("energy_events", [])
+    lines.append(f"Key changes: {len(key_changes)}" if key_changes else "Key changes: none")
+    lines += [f"Energy events: {len(energy_events)}", "", "Timeline (Key):", "-" * 60]
+
+    for entry in estimate.get("timeline", []):
+        bar_start = entry.get("bar_start")
+        bar_info = f" ({bar_start}:{entry.get('bar_end')})" if bar_start is not None else ""
+        lines.append(f"{format_clock(entry.get('start', 0))}-{format_clock(entry.get('end', 0))}{bar_info} -> "
+                     f"{entry.get('camelot', '?')} ({entry.get('key', 'unknown')}) - "
+                     f"{entry.get('type', 'unknown')} ({entry.get('score', 0):.4f})")
+    lines.append("-" * 60)
+
+    if energy_events:
+        lines += ["", "Energy Events (Structural):", "-" * 60]
+        for event in energy_events:
+            lines.append(f"{format_clock(event.get('time', 0))} (bar {event.get('bar', '?')}) -> "
+                         f"{event_label(event).upper()}")
+        lines.append("-" * 60)
+
+    mix_points = summary.get("mix_points", {})
+    for name, label in (("intro", "Intro"), ("outro", "Outro")):
+        mp = mix_points.get(name, {})
+        if mp:
+            lines.append(f"{label}: {mp.get('camelot')} ({mp.get('key')}) @ {format_clock(mp.get('time', 0))}")
+    return "\n".join(lines)
