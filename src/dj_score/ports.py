@@ -28,3 +28,10 @@ class LufsMeter(Protocol):
     """Integrated loudness (LUFS), or None when no meter is available. `adapters.loudness`."""
 
     def integrated_lufs(self, y: np.ndarray, sr: int) -> float | None: ...
+
+
+class StemSource(Protocol):
+    """Existing separated stems for a track, as {stem name: wav path}, or None.
+    `adapters.stems.StemFolder`."""
+
+    def find(self, audio_path: Path) -> dict[str, Path] | None: ...

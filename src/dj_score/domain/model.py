@@ -214,12 +214,13 @@ class EventPhrase:
 
 @dataclass
 class EventSummary:
+    """With no events, only `mode` and `event_count` (0) are set."""
     mode: str
     event_count: int
-    events_per_minute: float
-    avg_score: float
-    max_score: float
-    phrase_count: int
+    events_per_minute: float | None = None
+    avg_score: float | None = None
+    max_score: float | None = None
+    phrase_count: int | None = None
 
 
 @dataclass

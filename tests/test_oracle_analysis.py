@@ -221,3 +221,22 @@ def test_cue_overrides(camelot):
             ev["source"] = "manual"
     events = [replace(e, cue=choices[i % 5]) for i, e in enumerate(a.events.events)]
     assert _marks(cues.plan_cues(events, a.key.key_summary.key_changes, 3)) == _camelot_marks(rx, raw, 3)
+
+
+# -- events (pass 1 over every cache's stored feature phrases) -------------------
+
+@pytest.mark.parametrize("src", CAMELOT_CACHES, ids=lambda p: p.name)
+def test_feature_events_pass1(camelot, src):
+    from dj_score.domain import events
+    ed = camelot("event_detect")
+    raw = json.loads((src / cache_store.JSON_NAME).read_text(encoding="utf-8"))
+    a = cache_store.load(src)
+    if a.events.event_mode != "features":
+        pytest.skip("stem-mode cache")
+    for ctx, min_score in ((2, 0.15), (1, 0.05), (3, 0.3)):
+        old = ed.detect_feature_events(raw["events_block"]["event_phrases"], context=ctx, min_score=min_score)
+        new = events.detect_feature_events(a.events.event_phrases, context=ctx, min_score=min_score)
+        assert encode(new) == old
+    assert encode(events.compute_summary(a.events.events, a.events.event_phrases, a.duration, "features")) == \
+        ed.compute_summary(raw["events_block"]["events"], raw["events_block"]["event_phrases"], a.duration, "features")
+    assert encode(events.compute_summary([], [], 1.0, "x")) == ed.compute_summary([], [], 1.0, "x")

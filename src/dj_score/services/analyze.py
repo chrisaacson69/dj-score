@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dj_score.domain import key, spectral
+from dj_score.domain import events, key, spectral
 from dj_score.domain.audio import make_waveform, measure_loudness
 from dj_score.domain.beatgrid import build_beatgrid
-from dj_score.domain.model import KeyAnalysis, SpectrumAnalysis, TrackAnalysis
-from dj_score.ports import AudioLoader, LufsMeter
+from dj_score.domain.model import EventAnalysis, KeyAnalysis, SpectrumAnalysis, StemActivity, TrackAnalysis
+from dj_score.ports import AudioLoader, LufsMeter, StemSource
 
 
 def analyze_track(audio_path: Path, loader: AudioLoader, meter: LufsMeter,
@@ -47,3 +47,30 @@ def analyze_spectrum(a: TrackAnalysis) -> SpectrumAnalysis:
     s = spectral.compute_bar_spectra(a.waveform.y, a.sr, a.grid.measures)
     s.summary = spectral.compute_spectral_summary(s)
     return s
+
+
+def analyze_events(a: TrackAnalysis, audio_path: Path, stems: StemSource, loader: AudioLoader,
+                   phrase_bars=4) -> EventAnalysis:
+    """Stem mode when separated stems exist for the track, else feature mode."""
+    stem_paths = stems.find(audio_path)
+    if stem_paths:
+        energies = {name: events.compute_stem_phrase_energy(loader.load(path, a.sr), a.sr, a.grid.measures,
+                                                            phrase_bars=phrase_bars)
+                    for name, path in stem_paths.items()}
+        presence = events.compute_stem_presence(energies, presence_threshold=0.15)
+        phrases = events.stem_phrases(a.grid.measures, phrase_bars)
+        found = events.detect_stem_events(presence, phrases, min_gap_phrases=2)
+        mode, extra = "stems", StemActivity(stem_energies=energies, stem_presence=presence)
+    else:
+        bar_features = events.compute_bar_features(a.waveform.y, a.sr, a.grid.measures)
+        phrases = events.compute_phrase_features(bar_features, phrase_bars=phrase_bars)
+        found = events.detect_feature_events(phrases, context=2, min_score=0.15, min_features=2,
+                                             min_gap_phrases=2, bar_features=bar_features)
+        mode, extra = "features", None
+    return EventAnalysis(
+        events=found,
+        event_phrases=phrases,
+        event_mode=mode,
+        event_summary=events.compute_summary(found, phrases, a.duration, mode=mode),
+        event_extra=extra,
+    )

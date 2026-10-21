@@ -115,3 +115,56 @@ def test_quantization_report(camelot):
     np.testing.assert_array_equal(n.unique_intervals, o["unique_intervals"])
     assert (n.frame_duration_ms, n.unique_interval_count, n.interval_step_ms, n.matches_frame_hop) == \
         (o["frame_duration_ms"], o["unique_interval_count"], o["interval_step_ms"], o["matches_frame_hop"])
+
+
+def _camelot_run_events(ed, s, audio_path, phrase_bars=4):
+    """Verbatim body of camelot's `_run_events.do`."""
+    import librosa as _lr
+    stems_dir, stem_paths = ed.find_or_create_stems(str(audio_path))
+    if stem_paths:
+        se = {}
+        for sn, sp in stem_paths.items():
+            ys, _ = _lr.load(sp, sr=s.sr, mono=True)
+            se[sn] = ed.compute_stem_phrase_energy(ys, s.sr, s.measures, phrase_bars=phrase_bars)
+        spr = ed.compute_stem_presence(se, presence_threshold=0.15)
+        phrases = []
+        for i in range(0, len(s.measures), phrase_bars):
+            g = s.measures[i:i + phrase_bars]
+            if g:
+                phrases.append({"phrase_num": len(phrases) + 1, "start_bar": g[0]["measure_num"],
+                                "end_bar": g[-1]["measure_num"], "start": g[0]["start"], "end": g[-1]["end"]})
+        ev = ed.detect_stem_events(spr, phrases, min_gap_phrases=2)
+        mode = "stems"
+        extra = {"stem_energies": se, "stem_presence": spr}
+    else:
+        bf = ed.compute_bar_features(s.y, s.sr, s.measures)
+        phrases = ed.compute_phrase_features(bf, phrase_bars=phrase_bars)
+        ev = ed.detect_feature_events(phrases, context=2, min_score=0.15, min_features=2,
+                                      min_gap_phrases=2, bar_features=bf)
+        mode = "features"
+        extra = {}
+    sm = ed.compute_summary(ev, phrases, s.duration, mode=mode)
+    return {"events": ev, "phrases": phrases, "mode": mode, "summary": sm, **extra}
+
+
+def test_analyze_events(both, tmp_path, camelot):
+    from dj_score.adapters.stems import StemFolder
+    store, a = both
+    path = Path(CAMELOT_DIR) / a.audio_name
+    store.store_events(_camelot_run_events(camelot("event_detect"), store, path))
+    a.events = analyze.analyze_events(a, path, StemFolder(), LibrosaLoader())
+    assert a.events.event_mode == ("stems" if (path.parent / f"{path.stem}_stems").exists() else "features")
+    assert a.events.events, "no events: the comparison would be vacuous"
+    if a.events.event_mode == "features":
+        assert {e.pass_ for e in a.events.events} == {1, 2}, "both detector passes must be exercised"
+    (tmp_path / "old").mkdir()
+    (tmp_path / "new").mkdir()
+    store.save(tmp_path / "old")
+    cache_store.save(a, tmp_path / "new")
+    _assert_same_cache(tmp_path / "old", tmp_path / "new")
+
+
+def test_both_event_modes_covered(both):
+    """The fixture's tracks must include one stems and one features track."""
+    names = {p for p in AUDIO if (Path(CAMELOT_DIR) / f"{Path(p).stem}_stems").exists()}
+    assert names and names != set(AUDIO)
