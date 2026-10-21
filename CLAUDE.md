@@ -29,6 +29,9 @@ re-derive a function that exists in camelot; convert it. Never fold a near-dupli
 (`tests/fixtures/make_golden.py`). **Nothing is purged**: retired camelot tools and their outputs move to
 camelot's `archive/`. Set `DJ_SCORE_CAMELOT_DIR=../camelot_from_youtube` to also run the golden tests over
 every real cache there. Camelot's UI env is its `env1` (the only one with matplotlib + pygame).
+**Oracle tests** (`tests/test_oracle_*.py`) import camelot's original and require identical output; a conversion
+isn't done until it has one. Mutation-check them with `python -B`: a same-size edit restored within the same
+second leaves stale `.pyc` running (reproduced 2026-10-21).
 
 ## Decisions on record
 

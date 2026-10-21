@@ -94,7 +94,8 @@ class KeyCandidate:
 
 
 @dataclass
-class MeasureKey:
+class KeyEstimate:
+    """Best Krumhansl-profile match for one chroma vector."""
     tonic_pc: int
     mode: str
     key_name: str
@@ -102,6 +103,10 @@ class MeasureKey:
     score: float
     confidence: float
     top_candidates: list[KeyCandidate]
+
+
+@dataclass
+class MeasureKey(KeyEstimate):
     measure_num: int
     start: float
     end: float
@@ -109,14 +114,7 @@ class MeasureKey:
 
 
 @dataclass
-class KeyPhrase:
-    tonic_pc: int
-    mode: str
-    key_name: str
-    camelot: str
-    score: float
-    confidence: float
-    top_candidates: list[KeyCandidate]
+class KeyPhrase(KeyEstimate):
     phrase_num: int
     start_measure: int
     end_measure: int
@@ -167,7 +165,8 @@ class KeySummary:
 
 @dataclass
 class KeyAnalysis:
-    measure_keys: list[MeasureKey]
+    measure_keys: list[MeasureKey | None]
+    """None where a measure was too short to analyse."""
     phrases: list[KeyPhrase]
     key_segments: list[KeySegment]
     key_summary: KeySummary
@@ -190,6 +189,10 @@ class Event:
     n_stems: int | None = None
     stems_in: list[str] | None = None
     stems_out: list[str] | None = None
+    source: str | None = None
+    """"manual" for events entered in camelot's event dialog."""
+    cue: str | None = None
+    """Rekordbox cue override: "hot", "memory" or "auto" (the default when absent)."""
 
 
 @dataclass
