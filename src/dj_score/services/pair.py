@@ -4,9 +4,10 @@ The `--compare` flow of camelot `camelot_from_youtube.py`, with its reports
 (`collision_report`, `collision_to_json` from `collision.py`, `alignment_to_json`
 from `alignment.py`) converted as-is so the JSON CyborgDJ reads keeps its shape.
 
-Known inconsistency, kept from camelot: a bar range "200-260" means measure numbers
-200-260 (1-based) to the collision half, but bar index 200 (0-based) on a rigid grid
-from `first_beat` to the alignment half, so the two halves look one bar apart.
+Bar ranges are 1-based and inclusive in both halves ("200-260" = bars 200..260, 61
+bars), decided 2026-10-21. camelot read them as measure numbers for collision but as
+0-based indices for alignment, so its two halves looked one bar apart; and its two
+alignment entry points counted probes differently.
 """
 
 from __future__ import annotations
@@ -50,13 +51,14 @@ def compare_spectra(a: TrackAnalysis, b: TrackAnalysis, bars_a: str, bars_b: str
 def align_pair(audio_a: Path, audio_b: Path, loader: AudioLoader, sr: int, bpm: float,
                first_beat_a: int, first_beat_b: int, bars_a: str, bars_b: str,
                max_offset_ms=100.0) -> AlignmentResult:
-    """Multi-probe kick alignment, one 4-bar probe per 4 bars of overlap."""
-    start_a, end_a = (int(x) for x in bars_a.split("-"))
-    start_b = int(bars_b.split("-")[0])
+    """Multi-probe kick alignment, one 4-bar probe per 4 bars of the shorter range. Bars
+    count on a rigid grid from each track's first beat, bar 1 starting at it."""
+    (start_a, end_a), (start_b, end_b) = (tuple(int(x) for x in r.split("-")) for r in (bars_a, bars_b))
+    n_bars = min(end_a - start_a + 1, end_b - start_b + 1)
     return alignment.multi_probe_alignment(
         loader.load(audio_a, sr), loader.load(audio_b, sr), sr, bpm,
-        first_beat_a, first_beat_b, start_a, start_b,
-        n_probes=max(1, (end_a - start_a) // 4), probe_length_bars=4, max_offset_ms=max_offset_ms,
+        first_beat_a, first_beat_b, start_a - 1, start_b - 1,
+        n_probes=max(1, n_bars // 4), probe_length_bars=4, max_offset_ms=max_offset_ms,
     )
 
 

@@ -252,3 +252,49 @@ def test_key_window_bpm_auto_uses_the_grid():
     tempo = detect_beats(audio, LibrosaLoader(), sr=22050)[1].grid.tempo
     assert r["bpm_detection"]["bpm"] == tempo and "dj-score beat grid" in r["bpm_detection"]["detected_from"]
     assert r["analysis"]["starts"] == bar_starts(tempo, 2, 8, 2) and r["analysis"]["generated_from"] == "bpm/bars (auto-detected)"
+
+
+def _spectral_pair():
+    from conftest import CAMELOT_CACHES
+    from dj_score.adapters import cache_store
+    return [p for p in CAMELOT_CACHES if cache_store.load(p).spectrum is not None][:2]
+
+
+@pytest.mark.parametrize("bars,gap", [(("1-32", "1-32"), "10"), (("33-64", "9-40"), "6")])
+def test_pair_collision_matches_compare(camelot, bars, gap):
+    pa, pb = _spectral_pair()
+    common = ["--analysis-a", str(pa), "--analysis-b", str(pb), "--bars-a", bars[0], "--bars-b", bars[1],
+              "--min-gap-db", gap]
+    old = json.loads(_camelot(camelot, "camelot_from_youtube", ["--compare", "--audio-a", "a.wav", "--audio-b", "b.wav",
+                                                                *common]))
+    new = json.loads(_ours(["pair", *common]))
+    assert new["compare"]["collision"] == old["compare"]["collision"]
+    assert new["analysis"]["bars"] == "1-based, inclusive"
+
+
+def test_pair_alignment_is_compare_one_bar_later(camelot):
+    """1-based bars: dj-score's "9-25"/"5-21" are camelot --compare's 0-based "8-24"/"4-20"."""
+    a, b = (str(Path(CAMELOT_DIR) / n) for n in ("NL123D.wav", "NothingLeft1+2_bar400-bar445.wav"))
+    beats = ["--first-beat-a", "1000", "--first-beat-b", "2500"]
+    old = json.loads(_camelot(camelot, "camelot_from_youtube", ["--compare", "--audio-a", a, "--audio-b", b,
+                                                                "--bars-a", "8-24", "--bars-b", "4-20",
+                                                                "--bpm-a", "132.5", "--bpm-b", "132.5", *beats]))
+    new = json.loads(_ours(["pair", "--audio-a", a, "--audio-b", b, "--analysis-a", "none", "--analysis-b", "none",
+                            "--bars-a", "9-25", "--bars-b", "5-21", "--bpm", "132.5", *beats,
+                            "--sr", "22050"]))  # --compare aligned at its shared --sr default
+    assert new["compare"]["phase_alignment"] == old["compare"]["phase_alignment"]
+    assert "collision_error" in new["compare"]  # no analyses at "none"
+
+
+def test_pair_needs_something_to_compare():
+    with pytest.raises(SystemExit):
+        _ours(["pair", "--bars-a", "1-4", "--bars-b", "1-4"])
+
+
+def test_pair_report_and_plot(tmp_path):
+    pa, pb = _spectral_pair()
+    j, png = tmp_path / "p.json", tmp_path / "p.png"
+    text = _ours(["pair", "--analysis-a", str(pa), "--analysis-b", str(pb), "--bars-a", "1-32", "--bars-b", "1-32",
+                  "--json-out", str(j), "--save-plot", str(png)])
+    assert text.startswith("Spectral Collision Report:") and "JSON saved to" in text
+    assert png.exists() and json.loads(j.read_text(encoding="utf-8"))["compare"]["collision"]["n_bars"] == 32

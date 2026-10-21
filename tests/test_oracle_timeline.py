@@ -130,3 +130,14 @@ def test_dj_score_timeline_end_to_end(tmp_path):
         assert {f: s.get(f) for f in k} == k
     assert e["energy_events"] and all(ev["label"] == ev["types"][0] for ev in e["energy_events"])
     assert (tmp_path / "v_summary.png").exists() and (tmp_path / "v_detailed.png").exists()
+
+
+def test_timeline_plot_command(camelot, camelot_timeline, tmp_path):
+    """`dj-score timeline-plot` on a saved camelot timeline file = visualize_timeline's output."""
+    from test_oracle_cli import _camelot, _ours
+    src = tmp_path / "t.json"
+    src.write_text(json.dumps(camelot_timeline), encoding="utf-8")
+    _camelot(camelot, "visualize_timeline", [str(src), "--save", str(tmp_path / "old")])
+    _ours(["timeline-plot", str(src), "--save", str(tmp_path / "new")])
+    for mode in ("summary", "detailed"):
+        np.testing.assert_array_equal(plt.imread(tmp_path / f"new_{mode}.png"), plt.imread(tmp_path / f"old_{mode}.png"))

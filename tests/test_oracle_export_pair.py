@@ -155,7 +155,8 @@ def test_collision_reports(camelot):
 
 
 def test_align_pair(camelot):
-    """camelot's --compare alignment block vs align_pair + alignment_to_json."""
+    """align_pair (1-based bars) against camelot's multi_probe_alignment at the 0-based
+    indices those bars mean, + alignment_to_json."""
     import librosa
     al = camelot("alignment")
     pa, pb = (Path(CAMELOT_DIR) / n for n in ("NL123D.wav", "NothingLeft1+2_bar400-bar445.wav"))
@@ -165,7 +166,8 @@ def test_align_pair(camelot):
     a0, a1 = (int(x) for x in bars_a.split("-"))
     old = al.multi_probe_alignment(y_a, y_b, sr, bpm, fa, fb, a0, int(bars_b.split("-")[0]),
                                    n_probes=max(1, (a1 - a0) // 4), probe_length_bars=4, max_offset_ms=100.0)
-    new = pair.align_pair(pa, pb, LibrosaLoader(), sr, bpm, fa, fb, bars_a, bars_b)
+    # camelot's 0-based "8-24" / "4-20" are bars 9-25 / 5-21 here (17 bars -> 4 probes either way)
+    new = pair.align_pair(pa, pb, LibrosaLoader(), sr, bpm, fa, fb, "9-25", "5-21")
     assert len(new.probes) == 4
     import copy
     for fbs in ((fa, fb), (None, None)):

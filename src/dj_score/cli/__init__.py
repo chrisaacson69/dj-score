@@ -321,6 +321,89 @@ def cmd_timeline(args):
                     plt.show()
 
 
+def cmd_pair(args):
+    """Two-track transition: spectral collision + EQ advice, and kick phase alignment
+    (camelot's --compare, collision.py and alignment.py). Bars are 1-based in both halves."""
+    from dj_score.services import pair
+
+    def project(audio, analysis):
+        if analysis:
+            return Path(analysis)
+        return Path(audio).parent / Path(audio).stem if audio else None
+
+    compare, report_lines = {}, []
+    proj_a, proj_b = project(args.audio_a, args.analysis_a), project(args.audio_b, args.analysis_b)
+    if proj_a and proj_b:
+        try:
+            ta, tb = bootstrap.cache().load(proj_a), bootstrap.cache().load(proj_b)
+            if ta is None or tb is None:
+                raise FileNotFoundError(f"No analysis cache in {proj_a if ta is None else proj_b}")
+            pc = pair.compare_spectra(ta, tb, args.bars_a, args.bars_b, ta.audio_name or proj_a.name,
+                                      tb.audio_name or proj_b.name, min_gap_db=args.min_gap_db)
+            compare["collision"] = pair.collision_to_json(pc)
+            report_lines.append(pair.collision_report(pc))
+            if args.save_plot:
+                from dj_score.adapters.plots.collision import plot_collision
+                plot_collision(pc.collision, pc.gaps, pc.name_a, pc.name_b).savefig(args.save_plot, dpi=150,
+                                                                                     bbox_inches="tight")
+                report_lines.append(f"Saved plot: {args.save_plot}")
+        except Exception as e:
+            print(f"Warning: Collision analysis failed: {e}", file=sys.stderr)
+            compare["collision_error"] = str(e)
+
+    if args.bpm and args.first_beat_a is not None and args.first_beat_b is not None and args.audio_a and args.audio_b:
+        try:
+            res = pair.align_pair(Path(args.audio_a), Path(args.audio_b), bootstrap.loader(), args.sr, args.bpm,
+                                  args.first_beat_a, args.first_beat_b, args.bars_a, args.bars_b,
+                                  max_offset_ms=args.max_offset_ms)
+            compare["phase_alignment"] = pair.alignment_to_json(res, Path(args.audio_a).stem, Path(args.audio_b).stem,
+                                                                args.first_beat_a, args.first_beat_b)
+            report_lines += [f"\nPhase alignment: {res.offset_ms}ms ({res.offset_samples} samples)",
+                             f"Consistency: {res.consistency}",
+                             f"Recommendation: {res.recommendation.rationale}"]
+        except Exception as e:
+            print(f"Warning: Phase alignment failed: {e}", file=sys.stderr)
+            compare["alignment_error"] = str(e)
+
+    if not compare:
+        args.parser.error("nothing to compare: give two analysed tracks (--audio-a/-b or --analysis-a/-b) "
+                          "and/or --bpm with --first-beat-a/-b for alignment")
+    out = json.dumps({"analysis": {"type": "compare", "bars": "1-based, inclusive"}, "compare": compare}, indent=2)
+    if args.json_out:
+        Path(args.json_out).write_text(out, encoding="utf-8")
+        print("\n".join(report_lines))
+        print(f"\nJSON saved to: {args.json_out}")
+    else:
+        print(out)
+
+
+def cmd_timeline_plot(args):
+    """Render a saved timeline report (visualize_timeline.py)."""
+    import matplotlib.pyplot as plt
+
+    from dj_score.adapters.plots import timeline as views
+    path = Path(args.json_file)
+    if not path.exists():
+        print(f"Error: File not found: {path}")
+        sys.exit(1)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("analysis", {}).get("type") != "timeline":
+        print("Warning: This doesn't appear to be timeline analysis output.")
+        print("Make one with: dj-score timeline AUDIO --json-out FILE")
+    for mode, view in (("summary", views.plot_summary_view), ("detailed", views.plot_detailed_view)):
+        if args.mode not in (mode, "both"):
+            continue
+        fig = view(data)
+        if fig is None:
+            print("No raw segment data available for detailed view")
+        elif args.save:
+            fig.savefig(f"{args.save}_{mode}.png", dpi=150, bbox_inches="tight")
+            print(f"{mode.capitalize()} view saved to: {args.save}_{mode}.png")
+            plt.close(fig)
+    if not args.save:
+        plt.show()
+
+
 def cmd_stems_separate(args):
     from dj_score.services import stems
     paths = stems.separate_track(Path(args.audio), bootstrap.separator(
@@ -481,6 +564,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plot", choices=["summary", "detailed", "both"], help="Timeline views")
     p.add_argument("--plot-save", help="Save views to files (prefix, e.g. 'track1' -> track1_summary.png)")
     p.set_defaults(func=cmd_timeline)
+
+    p = sub.add_parser("timeline-plot", help="Render a saved timeline report (summary and/or detailed view)")
+    p.add_argument("json_file", help="Timeline JSON written by `dj-score timeline --json-out`")
+    p.add_argument("--mode", choices=["summary", "detailed", "both"], default="both", help="Which view (default: both)")
+    p.add_argument("--save", help="Save to files (prefix, e.g. 'track1' -> track1_summary.png) instead of showing")
+    p.set_defaults(func=cmd_timeline_plot)
+
+    p = sub.add_parser("pair", help="Two-track transition: spectral collision, EQ advice, kick alignment")
+    p.add_argument("--audio-a", help="Track A audio (alignment; also locates its analysis)")
+    p.add_argument("--audio-b", help="Track B audio")
+    p.add_argument("--analysis-a", help="Track A project folder with analysis_cache.* (default: <audio>/<stem>)")
+    p.add_argument("--analysis-b", help="Track B project folder")
+    p.add_argument("--bars-a", required=True, help="Track A overlap bars, 1-based inclusive, e.g. 200-260")
+    p.add_argument("--bars-b", required=True, help="Track B overlap bars, same length, e.g. 1-61")
+    p.add_argument("--bpm", type=float, help="Shared BPM after time-stretching (alignment)")
+    p.add_argument("--first-beat-a", type=int, help="Sample index of Track A's first beat (alignment)")
+    p.add_argument("--first-beat-b", type=int, help="Sample index of Track B's first beat (alignment)")
+    p.add_argument("--sr", type=int, default=44100,
+                   help="Sample rate for alignment; --first-beat-* are sample indices at this rate (default: 44100, "
+                        "as alignment.py; camelot --compare used 22050)")
+    p.add_argument("--min-gap-db", type=float, default=10.0, help="Spectral gap threshold in dB (default: 10)")
+    p.add_argument("--max-offset-ms", type=float, default=100.0, help="Alignment search window (default: 100)")
+    p.add_argument("--save-plot", help="Save the collision figure")
+    p.add_argument("--json-out", help="Write the JSON to a file and print the reports")
+    p.set_defaults(func=cmd_pair, parser=p)
 
     p = sub.add_parser("events", help="Structural events (stem mode when stems exist, else feature mode)")
     _grid_args(p)
