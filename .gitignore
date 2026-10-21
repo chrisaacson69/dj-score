@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.import_linter_cache/
+# audio and per-track outputs never go in this (public) repo
+*.wav
+*.mp3
+*.flac
+*.npz
+.env

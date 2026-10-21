@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dj-score"
+version = "0.0.1"
+description = "Shared DJ track-analysis library: beat grid, key, events, spectral score, collision, Rekordbox export."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy", "scipy", "librosa"]
+
+[project.optional-dependencies]
+plots = ["matplotlib"]
+loudness = ["pyloudnorm", "soundfile"]
+rekordbox = ["pyrekordbox"]
+stems = ["demucs", "torch", "soundfile"]
+youtube = ["requests", "python-dotenv"]
+dev = ["pytest", "import-linter"]
+
+[project.scripts]
+dj-score = "dj_score.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# --- The constitution: dependencies point inward. `lint-imports` enforces it. ---
+[tool.importlinter]
+root_package = "dj_score"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: cli -> bootstrap -> (adapters | services) -> ports -> domain"
+type = "layers"
+layers = [
+    "dj_score.cli",
+    "dj_score.bootstrap",
+    "dj_score.adapters | dj_score.services",
+    "dj_score.ports",
+    "dj_score.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core is pure: no plotting, UI, playback, ML runtime, file formats or network"
+type = "forbidden"
+source_modules = ["dj_score.domain", "dj_score.ports", "dj_score.services"]
+forbidden_modules = ["matplotlib", "tkinter", "pygame", "torch", "demucs", "pyrekordbox", "soundfile", "requests"]
+allow_indirect_imports = true
