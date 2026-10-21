@@ -12,3 +12,6 @@ dist/
 *.flac
 *.npz
 .env
+# code only: golden fixtures are data, regenerated locally by tests/fixtures/make_golden.py
+tests/fixtures/*
+!tests/fixtures/make_golden.py

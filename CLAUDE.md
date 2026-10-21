@@ -22,9 +22,13 @@ Install into a consumer's env: `pip install -e ../dj-score[plots,loudness,rekord
 
 ## How code arrives here
 
-**Copy → repoint → delete**, one module at a time, following `MIGRATION.md`. Golden tests from existing
+**Copy → repoint → archive**, one module at a time, following `MIGRATION.md`. Golden tests from existing
 `analysis_cache.json` files come first, so every move is checked against the code it came from. Never
 re-derive a function that exists in camelot; convert it. Never fold a near-duplicate without diffing it.
+**This repo is code only**: fixtures and all generated data are gitignored and regenerated locally
+(`tests/fixtures/make_golden.py`). **Nothing is purged**: retired camelot tools and their outputs move to
+camelot's `archive/`. Set `DJ_SCORE_CAMELOT_DIR=../camelot_from_youtube` to also run the golden tests over
+every real cache there. Camelot's UI env is its `env1` (the only one with matplotlib + pygame).
 
 ## Decisions on record
 
