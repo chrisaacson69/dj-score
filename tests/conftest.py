@@ -14,7 +14,7 @@ from pathlib import Path
 import matplotlib
 import pytest
 
-from dj_score.adapters import cache_store
+from dj_score.domain.codec import to_plain
 
 matplotlib.use("Agg")
 
@@ -36,4 +36,4 @@ def camelot():
 
 def encode(value):
     """A dj-score result in the plain JSON shape camelot's dicts have."""
-    return cache_store._encode(value)
+    return to_plain(value)

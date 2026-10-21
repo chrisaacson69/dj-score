@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import types
-import typing
 from pathlib import Path
 
 import numpy as np
 
+from dj_score.domain.codec import CodecError, from_plain, to_plain as _encode
 from dj_score.domain.model import (
     LEGACY_GRID_SOURCE,
     Beatgrid,
@@ -46,8 +45,17 @@ _TOP_LEVEL_KEYS = {
 }
 
 
-class CacheSchemaError(ValueError):
+class CacheSchemaError(CodecError):
     """The cache holds a key or shape that `domain/model.py` does not describe."""
+
+
+def _decode(tp, value):
+    try:
+        return from_plain(tp, value)
+    except CacheSchemaError:
+        raise
+    except CodecError as e:
+        raise CacheSchemaError(str(e)) from e
 
 
 class CacheStore:
@@ -156,53 +164,3 @@ def to_cache(a: TrackAnalysis) -> tuple[dict, dict[str, np.ndarray]]:
     data["_audio_name"] = a.audio_name
     data["beatgrid_source"] = g.source
     return data, arrays
-
-
-# -- generic record codec -----------------------------------------------------
-
-def _json_key(f: dataclasses.Field) -> str:
-    return f.metadata.get("key", f.name)
-
-
-def _decode(tp, value):
-    """Build `tp` from parsed JSON, recursing through dataclasses, lists, dicts
-    and optionals. Scalars pass through untouched so values round-trip exactly."""
-    if value is None:
-        return None
-    origin, args = typing.get_origin(tp), typing.get_args(tp)
-    if origin in (typing.Union, types.UnionType):
-        (inner,) = [t for t in args if t is not type(None)]
-        return _decode(inner, value)
-    if dataclasses.is_dataclass(tp):
-        if not isinstance(value, dict):
-            raise CacheSchemaError(f"{tp.__name__}: expected an object, got {type(value).__name__}")
-        hints = typing.get_type_hints(tp)
-        fields = {_json_key(f): f for f in dataclasses.fields(tp)}
-        unknown = set(value) - set(fields)
-        if unknown:
-            raise CacheSchemaError(f"{tp.__name__}: unknown keys {sorted(unknown)}")
-        return tp(**{f.name: _decode(hints[f.name], value[k]) for k, f in fields.items() if k in value})
-    if origin is list:
-        return [_decode(args[0], v) for v in value]
-    if origin is dict:
-        return {k: _decode(args[1], v) for k, v in value.items()}
-    if tp is np.ndarray:
-        return np.asarray(value)
-    return value
-
-
-def _encode(value):
-    """Inverse of `_decode`. None-valued dataclass fields are omitted, matching
-    caches where that key never existed."""
-    if dataclasses.is_dataclass(value):
-        return {_json_key(f): _encode(v) for f in dataclasses.fields(value)
-                if (v := getattr(value, f.name)) is not None}
-    if isinstance(value, list):
-        return [_encode(v) for v in value]
-    if isinstance(value, dict):
-        return {k: _encode(v) for k, v in value.items()}
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    return value

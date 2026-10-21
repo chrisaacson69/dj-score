@@ -35,3 +35,12 @@ class StemSource(Protocol):
     `adapters.stems.StemFolder`."""
 
     def find(self, audio_path: Path) -> dict[str, Path] | None: ...
+
+
+class RekordboxExporter(Protocol):
+    """Writes analyses into a Rekordbox XML collection. `adapters.rekordbox_xml.RekordboxXml`."""
+
+    def export_track(self, audio_path: Path, analysis: TrackAnalysis,
+                     include_cues: bool = True, max_hot_cues: int = 8) -> int: ...
+
+    def export_set(self, tracks: list[tuple[Path, TrackAnalysis]], playlist_name: str = "Camelot Set") -> int: ...
