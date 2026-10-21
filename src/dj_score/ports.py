@@ -44,3 +44,16 @@ class RekordboxExporter(Protocol):
                      include_cues: bool = True, max_hot_cues: int = 8) -> int: ...
 
     def export_set(self, tracks: list[tuple[Path, TrackAnalysis]], playlist_name: str = "Camelot Set") -> int: ...
+
+
+class StemSeparator(Protocol):
+    """Separates a track into stems on disk. `adapters.demucs.DemucsSeparator`."""
+
+    def separate(self, audio_path: Path, output_dir: Path | None = None) -> dict[str, Path]: ...
+
+
+class SeparationReader(Protocol):
+    """Reads a separation back: the mix as decoded for the model, and each saved stem.
+    `adapters.demucs.SeparationFolder`."""
+
+    def read(self, stems_dir: Path): ...
