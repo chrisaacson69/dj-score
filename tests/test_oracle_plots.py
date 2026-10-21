@@ -81,3 +81,52 @@ def test_collision_plot(camelot):
     assert new_g.suggested_crossovers, "pick bars with a crossover so the overlay is exercised"
     _assert_same_figure(collision_plot.plot_collision(new_c, new_g, "A", "B"),
                         co.plot_collision(old_c, old_g, "A", "B"))
+
+
+@pytest.mark.parametrize("zoom", [(None, None), (20.0, 35.0)])
+def test_bpm_plot(camelot, track, zoom):
+    from dj_score.adapters.plots import bpm as bpm_plot
+    bd = camelot("bpm_detect")
+    a, raw = track
+    span = {k: (np.asarray(v) if k in ("times", "bpms") else v) for k, v in raw["span_data"].items()}
+    old = bd.plot_bpm_analysis(a.waveform.y, a.sr, a.grid.beat_times, raw["measures"], raw["segments"], span,
+                               4, title="t", zoom_start=zoom[0], zoom_end=zoom[1])
+    new = bpm_plot.plot_bpm_analysis(a.waveform.y, a.sr, a.grid, 4, title="t", zoom_start=zoom[0], zoom_end=zoom[1])
+    _assert_same_figure(new, old)
+
+
+def _event_track(mode):
+    for p in CAMELOT_CACHES:
+        a = cache_store.load(p)
+        if a.events and a.events.event_mode == mode:
+            return a, json.loads((p / cache_store.JSON_NAME).read_text(encoding="utf-8"))
+    pytest.skip(f"no local {mode}-mode cache")
+
+
+@pytest.mark.parametrize("zoom", [(None, None), (30.0, 50.0)])
+def test_feature_event_plot(camelot, zoom):
+    from dj_score.adapters.plots import events as events_plot
+    ed = camelot("event_detect")
+    a, raw = _event_track("features")
+    ev = raw["events_block"]
+    old = ed.plot_feature_analysis(a.waveform.y, a.sr, raw["measures"], ev["event_phrases"], ev["events"], 4,
+                                   title="t", zoom_start=zoom[0], zoom_end=zoom[1])
+    new = events_plot.plot_feature_analysis(a.waveform.y, a.sr, a.grid.measures, a.events.event_phrases,
+                                            a.events.events, 4, title="t", zoom_start=zoom[0], zoom_end=zoom[1])
+    _assert_same_figure(new, old)
+
+
+@pytest.mark.parametrize("zoom", [(None, None), (30.0, 50.0)])
+def test_stem_event_plot(camelot, zoom):
+    from dj_score.adapters.plots import events as events_plot
+    ed = camelot("event_detect")
+    a, raw = _event_track("stems")
+    ev, ex = raw["events_block"], raw["events_block"]["event_extra"]
+    old = ed.plot_stem_analysis(a.waveform.y, a.sr, raw["measures"], ev["event_phrases"], ev["events"],
+                                ex["stem_energies"], ex["stem_presence"], 4, title="t",
+                                zoom_start=zoom[0], zoom_end=zoom[1])
+    x = a.events.event_extra
+    new = events_plot.plot_stem_analysis(a.waveform.y, a.sr, a.grid.measures, a.events.event_phrases,
+                                         a.events.events, x.stem_energies, x.stem_presence, 4, title="t",
+                                         zoom_start=zoom[0], zoom_end=zoom[1])
+    _assert_same_figure(new, old)

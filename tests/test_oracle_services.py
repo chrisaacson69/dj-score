@@ -33,12 +33,12 @@ def _camelot_run_bpm(bd, path, beats_per_bar=4, hop_length=512):
 
 
 @pytest.fixture(scope="module", params=AUDIO)
-def both(request, camelot):
+def both(request, camelot, camelot_at):
     """(camelot AnalysisStore after store_bpm, dj-score TrackAnalysis) for one track."""
     path = Path(CAMELOT_DIR) / request.param
     if not path.exists():
         pytest.skip(f"{path.name} not present")
-    store = camelot("audio_ui").AnalysisStore()
+    store = camelot_at("audio_ui").AnalysisStore()  # the pre-repoint store
     store.store_bpm(_camelot_run_bpm(camelot("bpm_detect"), path))
     store._audio_name = path.name  # what camelot's file-open sets after store.reset()
     return store, analyze.analyze_track(path, LibrosaLoader(), PyloudnormMeter())

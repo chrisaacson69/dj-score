@@ -305,21 +305,38 @@ def quantization_report(intervals: np.ndarray, frame_duration: float) -> Quantiz
     )
 
 
-def build_beatgrid(y, sr, hop_length=512, beats_per_bar=4, span=8,
-                   tolerance=2.0, min_segment_bars=4) -> Beatgrid:
-    """The full librosa-dp grid as camelot's UI builds it: track, trim the silent intro,
+@dataclass
+class GridDetection:
+    """A grid plus how it was found: the downbeat vote and the intro trim."""
+    grid: Beatgrid
+    downbeat: DownbeatEstimate
+    trim: TrimResult
+    frame_duration: float
+    """Seconds per hop frame: the beat tracker's time resolution."""
+
+
+def detect_grid(y, sr, hop_length=512, beats_per_bar=4, span=8,
+                tolerance=2.0, min_segment_bars=4) -> GridDetection:
+    """The full librosa-dp grid as camelot builds it: track, trim the silent intro,
     find the downbeat phase, then measures, rolling BPM and tempo segments."""
     tempo, beat_times = track_beats(y, sr, hop_length)
     trim = trim_silent_beats(y, sr, beat_times, hop_length=hop_length)
-    phase = estimate_downbeat_phase(y, sr, trim.beat_times).phase
-    measures = group_beats_into_measures(trim.beat_times, beats_per_bar, phase=phase)
-    return Beatgrid(
+    downbeat = estimate_downbeat_phase(y, sr, trim.beat_times)
+    measures = group_beats_into_measures(trim.beat_times, beats_per_bar, phase=downbeat.phase)
+    grid = Beatgrid(
         tempo=tempo,
         beat_times=trim.beat_times,
         measures=measures,
         segments=find_bpm_segments(measures, tolerance=tolerance, min_segment_bars=min_segment_bars),
         span=compute_span_bpm(trim.beat_times, span),
-        downbeat_phase=phase,
+        downbeat_phase=downbeat.phase,
         bars_trimmed=trim.bars_trimmed,
         source=LEGACY_GRID_SOURCE,
     )
+    return GridDetection(grid, downbeat, trim, hop_length / sr)
+
+
+def build_beatgrid(y, sr, hop_length=512, beats_per_bar=4, span=8,
+                   tolerance=2.0, min_segment_bars=4) -> Beatgrid:
+    """`detect_grid` without the detection details."""
+    return detect_grid(y, sr, hop_length, beats_per_bar, span, tolerance, min_segment_bars).grid

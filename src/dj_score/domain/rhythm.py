@@ -51,6 +51,26 @@ class RhythmSection:
     end_time: float | None = None
 
 
+@dataclass
+class Bar:
+    """A bar on a rigid grid: what `classify_rhythm` needs when no beat grid exists."""
+    measure_num: int
+    start: float
+    end: float
+
+
+def rigid_bars(duration, bpm, first_downbeat=0.0, beats_per_bar=4) -> list[Bar]:
+    """Equal bars from `first_downbeat` at `bpm`; the last may be cut short by the
+    track end (kept while at least half a bar remains)."""
+    bar_duration = 60.0 / bpm * beats_per_bar
+    bars, t, n = [], first_downbeat, 0
+    while t + bar_duration <= duration + bar_duration * 0.5:
+        bars.append(Bar(n, t, min(t + bar_duration, duration)))
+        t += bar_duration
+        n += 1
+    return bars
+
+
 def classify_bar_rhythm(audio_segment, sr, beat_interval, beats_per_bar=4,
                         onset_threshold=None) -> BarRhythm:
     """Classify one bar's kick pattern from peak-picked onsets on the kick envelope."""
@@ -148,7 +168,7 @@ def classify_bar_rhythm(audio_segment, sr, beat_interval, beats_per_bar=4,
     return BarRhythm(pattern, round(kick_density, 2), n_onsets, round(confidence, 3))
 
 
-def classify_rhythm(y, sr, measures: list[Measure], beat_interval, beats_per_bar=4) -> list[BarRhythm]:
+def classify_rhythm(y, sr, measures: list[Measure] | list[Bar], beat_interval, beats_per_bar=4) -> list[BarRhythm]:
     """`classify_bar_rhythm` for every measure, tagged with its bar number."""
     results = []
     for m in measures:
@@ -186,7 +206,7 @@ def summarize_rhythm(bar_rhythms: list[BarRhythm]) -> RhythmSummary:
     )
 
 
-def summarize_rhythm_sections(bar_rhythms: list[BarRhythm], measures: list[Measure] | None = None) -> list[RhythmSection]:
+def summarize_rhythm_sections(bar_rhythms: list[BarRhythm], measures: list[Measure] | list[Bar] | None = None) -> list[RhythmSection]:
     """Runs of consecutive bars with the same pattern; times filled when `measures` is given."""
     if not bar_rhythms:
         return []

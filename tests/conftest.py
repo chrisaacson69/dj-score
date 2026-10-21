@@ -7,6 +7,7 @@ without one they skip.
 """
 
 import importlib
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -37,3 +38,30 @@ def camelot():
 def encode(value):
     """A dj-score result in the plain JSON shape camelot's dicts have."""
     return to_plain(value)
+
+
+# camelot's last commit before its UI moved onto dj-score. Modules that have since been
+# repointed (audio_ui) are compared at this revision, not the working copy.
+CAMELOT_PRE_REPOINT = "150422a"
+
+
+@pytest.fixture(scope="session")
+def camelot_at(camelot, tmp_path_factory):
+    """Import a camelot module as it was at a revision: `camelot_at("audio_ui")`."""
+    import subprocess
+    cache = {}
+    root = Path(CAMELOT_DIR).resolve()
+    out = tmp_path_factory.mktemp("camelot_rev")
+
+    def load(module, rev=CAMELOT_PRE_REPOINT):
+        if (module, rev) not in cache:
+            src = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{module}.py"],
+                                 capture_output=True, check=True).stdout
+            path = out / f"{module}_{rev}.py"
+            path.write_bytes(src)
+            spec = importlib.util.spec_from_file_location(f"{module}_{rev}", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            cache[(module, rev)] = mod
+        return cache[(module, rev)]
+    return load

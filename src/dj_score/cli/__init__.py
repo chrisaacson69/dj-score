@@ -1,0 +1,399 @@
+"""`dj-score` console entry point. Thin: parse arguments, call a service, print.
+
+Subcommands replace camelot's per-module CLIs (`bpm_detect.py`, `key_detect.py`,
+`event_detect.py`, `spectral_analysis.py`, `rhythm_detect.py`, `rekordbox_export.py`,
+`separate_stems.py`, `resum_check.py`, `analyze_stems.py`), with their arguments.
+One deliberate difference: `key` and `events` use the same downbeat-aligned grid as
+the UI and the other commands (camelot's two CLIs grouped bars from beat 0).
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+from pathlib import Path
+
+from dj_score import __version__, bootstrap
+from dj_score.cli import reports
+from dj_score.domain.codec import to_plain
+
+
+def _write_json(path, data, label="JSON written to"):
+    Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    print(f"{label} {path}")
+
+
+def _show_or_save(fig, save_plot, label="Chart saved to"):
+    import matplotlib.pyplot as plt
+    if save_plot:
+        fig.savefig(save_plot, dpi=150, bbox_inches="tight")
+        print(f"{label} {save_plot}")
+    else:
+        plt.show()
+
+
+def _audio(path_str) -> Path:
+    path = Path(path_str)
+    if not path.exists():
+        print(f"Error: File not found: {path_str}", file=sys.stderr)
+        sys.exit(1)
+    return path
+
+
+def _track(args):
+    """Load + grid + loudness for the grid-based commands, with camelot's progress lines."""
+    from dj_score.services import analyze
+    path = _audio(args.audio)
+    print(f"Loading {path.name} (sr={args.sr}, hop={args.hop_length})...", file=sys.stderr)
+    a = analyze.analyze_track(path, bootstrap.loader(), bootstrap.meter(), sr=args.sr,
+                              hop_length=args.hop_length, beats_per_bar=args.beats_per_bar)
+    print(f"Detected {len(a.grid.beat_times)} beats (librosa tempo: {a.grid.tempo:.1f} BPM)", file=sys.stderr)
+    return path, a
+
+
+# -- commands -----------------------------------------------------------------------
+
+def cmd_bpm(args):
+    from dj_score.services import analyze
+    path = _audio(args.audio)
+    print(f"Loading {path.name} (sr={args.sr}, hop={args.hop_length})...", file=sys.stderr)
+    y, det = analyze.detect_beats(path, bootstrap.loader(), sr=args.sr, hop_length=args.hop_length,
+                                  beats_per_bar=args.beats_per_bar, span=args.span,
+                                  tolerance=args.tolerance, min_segment_bars=args.min_segment_bars)
+    grid = det.grid
+    print(f"Detected {len(grid.beat_times)} beats (librosa tempo: {grid.tempo:.1f} BPM)", file=sys.stderr)
+    if det.trim.bars_trimmed > 0:
+        print(f"Trimmed {det.trim.bars_trimmed} silent intro bar(s) ({det.trim.beats_trimmed} beats) from beat grid",
+              file=sys.stderr)
+    if len(grid.beat_times) < 2:
+        print("Error: Too few beats detected.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Downbeat phase: {det.downbeat.phase} (confidence: {det.downbeat.confidence:.3f})", file=sys.stderr)
+    if det.downbeat.scores:
+        print(f"  Phase scores: {det.downbeat.scores}", file=sys.stderr)
+
+    print(reports.bpm_report(path.name, grid, det.frame_duration, args.tolerance, args.beats_per_bar))
+    if not args.no_plot:
+        from dj_score.adapters.plots.bpm import plot_bpm_analysis
+        _show_or_save(plot_bpm_analysis(y, args.sr, grid, args.beats_per_bar, title=f"- {path.name}",
+                                        zoom_start=args.zoom_start, zoom_end=args.zoom_end), args.save_plot)
+
+
+def cmd_key(args):
+    from dj_score.services import analyze
+    path, a = _track(args)
+    if len(a.grid.beat_times) < 2:
+        print("Error: Too few beats detected.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Grouped into {len(a.grid.measures)} measures", file=sys.stderr)
+    print(f"Analyzing key (harmonic={'off' if args.full_mix else 'on'}, {args.phrase_bars}-bar phrases)...",
+          file=sys.stderr)
+    k = analyze.analyze_key(a, phrase_bars=args.phrase_bars, min_segment_phrases=args.min_segment_phrases,
+                            use_harmonic=not args.full_mix)
+
+    print(reports.key_report(path.name, a.grid.tempo, k, args.phrase_bars))
+    if args.json_out:
+        _write_json(args.json_out, {
+            "file": path.name, "duration": round(a.duration, 2), "bpm": round(a.grid.tempo, 2), "sr": a.sr,
+            "beats_per_bar": args.beats_per_bar, "phrase_bars": args.phrase_bars,
+            "summary": to_plain(k.key_summary) or {}, "segments": to_plain(k.key_segments),
+            "phrases": to_plain(k.phrases)})
+    if not args.no_plot:
+        from dj_score.adapters.plots.key import plot_key_analysis
+        _show_or_save(plot_key_analysis(a.waveform.y, a.sr, a.grid.beat_times, a.grid.measures, k.phrases,
+                                        k.key_segments, args.beats_per_bar, title=f"- {path.name}",
+                                        zoom_start=args.zoom_start, zoom_end=args.zoom_end,
+                                        phrase_bars=args.phrase_bars), args.save_plot)
+
+
+def cmd_events(args):
+    from dj_score.services import analyze
+    path, a = _track(args)
+    if len(a.grid.beat_times) < 8:
+        print("Error: Too few beats detected.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Grouped into {len(a.grid.measures)} measures", file=sys.stderr)
+    ev = analyze.analyze_events(
+        a, path, bootstrap.stem_source(args.stems_dir), bootstrap.loader(), phrase_bars=args.phrase_bars,
+        presence_threshold=args.presence_threshold, context=args.context, min_score=args.min_score,
+        min_features=args.min_features, min_gap_phrases=args.min_gap,
+        separator=bootstrap.separator() if args.auto_separate else None)
+    print(f"{ev.event_mode.capitalize()} mode: {len(ev.event_phrases)} phrases", file=sys.stderr)
+
+    print(reports.events_report(path.name, a.grid.tempo, a.duration, ev, args.phrase_bars))
+    stems = ev.event_mode == "stems"
+    if args.json_out:
+        result = {"file": path.name, "duration": round(a.duration, 2), "bpm": round(a.grid.tempo, 2),
+                  "sr": a.sr, "beats_per_bar": args.beats_per_bar, "phrase_bars": args.phrase_bars,
+                  "summary": to_plain(ev.event_summary), "events": to_plain(ev.events)}
+        if stems:
+            result["stem_presence_summary"] = {s: sum(p) for s, p in ev.event_extra.stem_presence.items()}
+        _write_json(args.json_out, result)
+    if not args.no_plot:
+        from dj_score.adapters.plots import events as plots
+        kw = dict(title=f"- {path.name}", phrase_bars=args.phrase_bars,
+                  zoom_start=args.zoom_start, zoom_end=args.zoom_end)
+        if stems:
+            fig = plots.plot_stem_analysis(a.waveform.y, a.sr, a.grid.measures, ev.event_phrases, ev.events,
+                                           ev.event_extra.stem_energies, ev.event_extra.stem_presence,
+                                           args.beats_per_bar, **kw)
+        else:
+            fig = plots.plot_feature_analysis(a.waveform.y, a.sr, a.grid.measures, ev.event_phrases, ev.events,
+                                              args.beats_per_bar, **kw)
+        _show_or_save(fig, args.save_plot)
+
+
+def cmd_spectrum(args):
+    from dj_score.services import analyze
+    path = _audio(args.audio)
+    print(f"Loading: {path.name}")
+    a = analyze.analyze_track(path, bootstrap.loader(), bootstrap.meter())
+    print(f"  {len(a.grid.measures)} bars, ~{a.grid.tempo:.1f} BPM")
+    print("Computing bar spectra...")
+    s = analyze.analyze_spectrum(a)
+    print("\nSpectral Summary:")
+    print(f"  Profile: {s.summary.energy_profile}")
+    print(f"  Centroid: {s.summary.spectral_centroid_hz} Hz")
+    print(f"  Dominant band: {s.summary.dominant_band_hz} Hz")
+    if args.json_out:
+        _write_json(args.json_out, to_plain(s.summary), label="Saved JSON:")
+    from dj_score.adapters.plots.spectral import plot_spectrogram
+    _show_or_save(plot_spectrogram(s, a.grid.measures, title=f"Spectral Energy — {path.stem}"),
+                  args.save_plot, label="Saved plot:")
+
+
+def cmd_rhythm(args):
+    from dj_score.services import analyze
+    r = analyze.analyze_rhythm(_audio(args.audio), bootstrap.loader(), args.bpm,
+                               first_downbeat=args.first_downbeat, sr=args.sr)
+    out = json.dumps({"summary": to_plain(r.summary), "sections": to_plain(r.sections),
+                      "per_bar": to_plain(r.per_bar)}, indent=2)
+    if args.json_out:
+        Path(args.json_out).write_text(out, encoding="utf-8")
+        print(f"Saved to {args.json_out}")
+    else:
+        print(out)
+
+
+def cmd_export(args):
+    from dj_score.services import export
+    a = bootstrap.cache().load(Path(args.project))
+    if a is None:
+        print(f"Error: no analysis cache in {args.project}", file=sys.stderr)
+        sys.exit(1)
+    n = export.export_to_rekordbox(_audio(args.audio), a, bootstrap.rekordbox(Path(args.output)),
+                                   include_cues=not args.no_cues)
+    print(f"Exported to: {args.output}")
+    print(f"  Tracks in XML: {n}")
+    print(f"  BPM: {a.grid.tempo}")
+    if a.key and a.key.key_summary:
+        dom = a.key.key_summary.dominant
+        print(f"  Key: {dom.key_name} ({dom.camelot})")
+    if a.events:
+        print(f"  Events: {len(a.events.events)}")
+    print(f"\nPoint Rekordbox at: {args.output}")
+    print("  Preferences > Advanced > rekordbox xml > Browse")
+
+
+def cmd_stems_separate(args):
+    from dj_score.services import stems
+    paths = stems.separate_track(Path(args.audio), bootstrap.separator(
+        model_name=args.model, device="cpu" if args.cpu else None, segment_length=args.segment,
+        shifts=args.shifts, mp3_output=args.mp3, float_output=args.float),
+        Path(args.output_dir) if args.output_dir else None)
+    print("\n" + "=" * 50 + "\nStem separation complete!\n" + "=" * 50)
+    for name, p in paths.items():
+        print(f"  {name}: {p}")
+
+
+def cmd_stems_check(args):
+    import numpy as np
+
+    from dj_score.services import stems
+    dirs = [Path(d) for d in args.dirs]
+    if args.root:
+        dirs += sorted(p.parent for p in Path(args.root).rglob("separation_info.json"))
+    if not dirs:
+        args.parser.error("no stem folders given")
+
+    rows = []
+    for d in dirs:
+        try:
+            r = stems.inspect_stems(d, bootstrap.separation_reader(), bootstrap.loader(), probe=False)
+        except Exception as e:
+            print(f"FAIL {d}: {e}", file=sys.stderr)
+            continue
+        rs = r.resummation
+        rows.append({"track": r.track, "model": r.model, "seconds": rs.seconds, "residual_db": rs.residual_db,
+                     **{f"clip_{k}": v for k, v in rs.clip.items()}, **{f"share_{k}": v for k, v in rs.share.items()}})
+    if not rows:
+        sys.exit(1)
+
+    keys = list(dict.fromkeys(k for r in rows for k in r))
+    print("\t".join(keys))
+    for r in rows:
+        print("\t".join(str(r.get(k, "")) for k in keys))
+    res = np.array([r["residual_db"] for r in rows])
+    print(f"\n{len(rows)} tracks  residual_db  median {np.median(res):.2f}  worst {res.max():.2f}")
+    if args.csv:
+        with open(args.csv, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=keys)
+            w.writeheader()
+            w.writerows(rows)
+
+
+def cmd_stems_probe(args):
+    """Unvalidated vocal-vs-synth probe (see domain.stems.vocal_probe)."""
+    from dj_score.domain.stems import vocal_probe
+    from dj_score.services.stems import PROBE_SR
+    if not args.stems_dir and not args.audio:
+        args.parser.error("Either --stems-dir or --audio is required")
+
+    def probe(p):
+        result = {"file": str(p), **to_plain(vocal_probe(bootstrap.loader().load(p, PROBE_SR), PROBE_SR,
+                                                         segment_duration=args.segment_duration))}
+        return result
+
+    if args.audio:
+        r = probe(Path(args.audio))
+        print("\nResults:")
+        print(f"  Vocal likelihood: {r['vocal_likelihood']:.2f}")
+        print(f"  Classification: {r['classification']}")
+        print(f"  Reasons: {', '.join(r.get('scoring_reasons', []))}")
+        if args.output:
+            _write_json(args.output, r, label="\nSaved to:")
+        return
+
+    d = Path(args.stems_dir)
+    files = sorted(d.glob("*.wav"))
+    if not files:
+        print(f"No .wav files found in {d}")
+        sys.exit(1)
+    results = {"stems_dir": str(d), "stems": {f.stem: probe(f) for f in files}}
+    for name, r in results["stems"].items():
+        bar = "#" * int(r["vocal_likelihood"] * 20) + "-" * (20 - int(r["vocal_likelihood"] * 20))
+        print(f"{name:10s}: [{bar}] {r['vocal_likelihood']:.2f} - {r['classification']}")
+    _write_json(Path(args.output) if args.output else d / "stem_analysis.json", results,
+                label="\nResults saved to:")
+
+
+# -- parser -------------------------------------------------------------------------
+
+def _grid_args(p, sr=44100):
+    p.add_argument("audio", help="Path to audio file (WAV/MP3/FLAC)")
+    p.add_argument("--sr", type=int, default=sr, help="Sample rate (default: 44100 for 11.6ms frame resolution)")
+    p.add_argument("--hop-length", type=int, default=512, help="Hop length for beat tracker (default: 512)")
+    p.add_argument("--beats-per-bar", type=int, default=4, help="Beats per bar (default: 4)")
+
+
+def _plot_args(p, json_out=True):
+    p.add_argument("--zoom-start", type=float, default=None, help="Zoom chart start time in seconds")
+    p.add_argument("--zoom-end", type=float, default=None, help="Zoom chart end time in seconds")
+    p.add_argument("--no-plot", action="store_true", help="Skip chart")
+    p.add_argument("--save-plot", help="Save chart to file instead of showing")
+    if json_out:
+        p.add_argument("--json-out", help="Write JSON results to file")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="dj-score", description="DJ track analysis.")
+    parser.add_argument("--version", action="version", version=f"dj-score {__version__}")
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    p = sub.add_parser("bpm", help="Beat grid and BPM with frame-quantization awareness")
+    _grid_args(p)
+    p.add_argument("--tolerance", type=float, default=2.0, help="BPM tolerance for segment grouping (default: 2.0)")
+    p.add_argument("--min-segment-bars", type=int, default=4,
+                   help="Minimum bars for a segment to stand alone (default: 4)")
+    p.add_argument("--span", type=int, default=8, help="Beat span for smoothed BPM curve (default: 8)")
+    _plot_args(p, json_out=False)
+    p.set_defaults(func=cmd_bpm)
+
+    p = sub.add_parser("key", help="Measure-aligned key and Camelot segments")
+    _grid_args(p)
+    p.add_argument("--phrase-bars", type=int, default=4, help="Bars per phrase (default: 4)")
+    p.add_argument("--min-segment-phrases", type=int, default=2,
+                   help="Minimum phrases for a key segment to stand alone (default: 2)")
+    p.add_argument("--full-mix", action="store_true", help="Use the full mix (disable harmonic-only)")
+    _plot_args(p)
+    p.set_defaults(func=cmd_key)
+
+    p = sub.add_parser("events", help="Structural events (stem mode when stems exist, else feature mode)")
+    _grid_args(p)
+    p.add_argument("--stems-dir", default=None, help="Folder with drums/bass/vocals/other.wav")
+    p.add_argument("--auto-separate", action="store_true", help="Run Demucs when no stems exist (stems extra)")
+    p.add_argument("--presence-threshold", type=float, default=0.15, help="Stem presence threshold (default: 0.15)")
+    p.add_argument("--phrase-bars", type=int, default=4, help="Bars per phrase (default: 4)")
+    p.add_argument("--context", type=int, default=2, help="Phrases of context for change detection (default: 2)")
+    p.add_argument("--min-score", type=float, default=0.15, help="Minimum change score (default: 0.15)")
+    p.add_argument("--min-features", type=int, default=2, help="Minimum changing features (default: 2)")
+    p.add_argument("--min-gap", type=int, default=2, help="Minimum phrases between events (default: 2)")
+    _plot_args(p)
+    p.set_defaults(func=cmd_events)
+
+    p = sub.add_parser("spectrum", help="Per-bar third-octave spectral analysis")
+    p.add_argument("audio", help="Path to audio file")
+    p.add_argument("--save-plot", default=None, help="Save chart to file instead of showing")
+    p.add_argument("--json-out", default=None, help="Write the spectral summary to file")
+    p.set_defaults(func=cmd_spectrum)
+
+    p = sub.add_parser("rhythm", help="Kick pattern per bar on a rigid grid")
+    p.add_argument("audio", help="Path to audio file.")
+    p.add_argument("--bpm", type=float, required=True, help="Track BPM.")
+    p.add_argument("--first-downbeat", type=float, default=0.0, help="First downbeat in seconds (default: 0).")
+    p.add_argument("--sr", type=int, default=44100, help="Sample rate.")
+    p.add_argument("--json-out", help="Write JSON output to file.")
+    p.set_defaults(func=cmd_rhythm)
+
+    p = sub.add_parser("export", help="Export an analysed track to a Rekordbox XML collection")
+    p.add_argument("--project", "-p", required=True, help="Project directory with analysis_cache.json")
+    p.add_argument("--audio", "-a", required=True, help="Path to the audio file")
+    p.add_argument("--output", "-o", required=True, help="Collection XML to add the track to (created if missing)")
+    p.add_argument("--no-cues", action="store_true", help="Skip exporting event markers as cue points")
+    p.set_defaults(func=cmd_export)
+
+    stems = sub.add_parser("stems", help="Stem separation and checks").add_subparsers(dest="stems_command",
+                                                                                      metavar="ACTION")
+    p = stems.add_parser("separate", help="Separate audio into stems with Demucs (stems extra)")
+    p.add_argument("--audio", "-a", required=True, help="Path to input audio file")
+    p.add_argument("--output-dir", "-o", help="Output directory for stems (default: <audio>_stems/)")
+    p.add_argument("--model", "-m", default="htdemucs",
+                   choices=["htdemucs", "htdemucs_ft", "htdemucs_6s", "mdx_extra", "mdx_extra_q"],
+                   help="Demucs model to use (default: htdemucs)")
+    p.add_argument("--cpu", action="store_true", help="Force CPU processing")
+    p.add_argument("--segment", type=int, default=None, help="Segment length in seconds (for memory management)")
+    p.add_argument("--shifts", type=int, default=1, help="Random shifts to average (1-10, higher=better, slower)")
+    p.add_argument("--mp3", action="store_true", help="Output MP3 instead of WAV")
+    p.add_argument("--float", action="store_true", help="32-bit float WAV without clamping (for re-summation checks)")
+    p.set_defaults(func=cmd_stems_separate)
+
+    p = stems.add_parser("check", help="Do separated stems re-sum to the mix? (G7 check 1)")
+    p.add_argument("dirs", nargs="*", help="Stem folders containing separation_info.json")
+    p.add_argument("--root", help="Scan this folder for */separation_info.json")
+    p.add_argument("--csv", help="Also write results to this CSV")
+    p.set_defaults(func=cmd_stems_check, parser=p)
+
+    p = stems.add_parser("probe", help="Vocal-vs-synth probe per stem (unvalidated)")
+    p.add_argument("--stems-dir", "-d", help="Directory containing stem .wav files")
+    p.add_argument("--audio", "-a", help="Single audio file to analyze")
+    p.add_argument("--output", "-o", help="Output JSON file path")
+    p.add_argument("--segment-duration", type=float, default=5.0,
+                   help="Duration of analysis segments in seconds (default: 5.0)")
+    p.set_defaults(func=cmd_stems_probe, parser=p)
+
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not getattr(args, "func", None):
+        parser.print_help()
+        return
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
