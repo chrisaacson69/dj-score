@@ -197,6 +197,80 @@ def cmd_export(args):
     print("  Preferences > Advanced > rekordbox xml > Browse")
 
 
+UNSUPPORTED_HINT_EXTS = {".weba", ".webm", ".opus"}
+
+
+def cmd_key_window(args):
+    """camelot_from_youtube's single-window and --consensus key modes."""
+    import os
+
+    from dj_score.services import analyze
+    path = _audio(args.audio)
+    if path.suffix.lower() in UNSUPPORTED_HINT_EXTS:
+        raise SystemExit(f"Input format {path.suffix.lower()} often requires ffmpeg. Convert to WAV/MP3/FLAC and re-run.")
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+    api_key = args.yt_api_key or os.environ.get("YT_API_KEY")
+
+    yt_meta = {}
+    if args.url and api_key:
+        from dj_score.adapters.youtube import video_metadata
+        yt_meta = video_metadata(args.url, api_key)
+
+    use_harmonic = not args.full_mix
+    loader = bootstrap.loader()
+    result = {"youtube": yt_meta,
+              "audio": {"path": args.audio, "sr": args.sr, "mono": True, "harmonic_only": use_harmonic}}
+
+    bpm_value = None
+    if args.bpm is not None:
+        if args.bpm.lower() == "auto":
+            # camelot used its own 60 s beat tracker here; dj-score uses the full-track grid
+            _, det = analyze.detect_beats(path, loader, sr=args.sr)
+            bpm_value = det.grid.tempo
+            result["bpm_detection"] = {"bpm": bpm_value, "detected_from": "dj-score beat grid (librosa-dp, full track)",
+                                       "beat_count": int(len(det.grid.beat_times))}
+        else:
+            try:
+                bpm_value = float(args.bpm)
+            except ValueError:
+                raise SystemExit(f"Invalid --bpm value: {args.bpm}. Use a number or 'auto'.")
+
+    if args.consensus:
+        if args.starts:
+            starts = [float(s.strip()) for s in args.starts.split(",") if s.strip()]
+        elif bpm_value is not None and args.bar_start is not None:
+            starts = analyze.bar_starts(bpm_value, args.bar_start, args.bar_step, args.num_windows, args.beats_per_bar)
+        else:
+            step = max(30.0, float(args.window) / 2.0)
+            starts = [round(float(args.start) + i * step, 3) for i in range(int(args.num_windows))]
+        result["analysis"] = {
+            "type": "consensus_strict", "window": float(args.window), "starts": starts,
+            "min_confidence": float(args.min_confidence), "bpm": bpm_value,
+            "generated_from": (
+                "explicit --starts" if args.starts else
+                "bpm/bars (auto-detected)" if (args.bpm and args.bpm.lower() == "auto" and bpm_value
+                                               and args.bar_start is not None) else
+                "bpm/bars" if (bpm_value is not None and args.bar_start is not None) else
+                "fallback rolling"),
+        }
+        consensus, windows = analyze.key_consensus(path, loader, starts, sr=args.sr, window=args.window,
+                                                   use_harmonic=use_harmonic, min_conf=args.min_confidence)
+        result["estimate"] = {"consensus": to_plain(consensus), "windows": to_plain(windows)}
+    else:
+        result["analysis"] = {"type": "single", "start": float(args.start), "duration": float(args.duration)}
+        result["estimate"] = to_plain(analyze.key_window(path, loader, sr=args.sr, start=args.start,
+                                                         duration=args.duration, use_harmonic=use_harmonic))
+
+    out = json.dumps(result, indent=2)
+    if args.json_out:
+        Path(args.json_out).write_text(out, encoding="utf-8")
+    print(out)
+
+
 def cmd_stems_separate(args):
     from dj_score.services import stems
     paths = stems.separate_track(Path(args.audio), bootstrap.separator(
@@ -319,6 +393,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--full-mix", action="store_true", help="Use the full mix (disable harmonic-only)")
     _plot_args(p)
     p.set_defaults(func=cmd_key)
+
+    p = sub.add_parser("key-window", help="Key of one window, or strict consensus over several (+ YouTube metadata)")
+    p.add_argument("audio", help="Path to local audio file (WAV/MP3/FLAC recommended)")
+    p.add_argument("--sr", type=int, default=22050, help="Sample rate for analysis (default: 22050)")
+    p.add_argument("--start", type=float, default=90.0, help="Start time for single-window analysis (seconds)")
+    p.add_argument("--duration", type=float, default=120.0, help="Duration for single-window analysis (seconds)")
+    p.add_argument("--consensus", action="store_true", help="Run strict consensus (multi-window)")
+    p.add_argument("--window", type=float, default=120.0, help="Window length for consensus analysis (seconds)")
+    p.add_argument("--starts", help="Comma-separated explicit start times for consensus, e.g. '90,148,206'.")
+    p.add_argument("--bpm", help="BPM used to generate starts from bars. 'auto' uses the detected beat grid.")
+    p.add_argument("--bar-start", type=int, help="Starting bar number (e.g., 48)")
+    p.add_argument("--bar-step", type=int, default=32, help="Step in bars between windows (default: 32)")
+    p.add_argument("--num-windows", type=int, default=4, help="Number of windows to generate (default: 4)")
+    p.add_argument("--beats-per-bar", type=float, default=4.0, help="Beats per bar (default: 4.0)")
+    p.add_argument("--min-confidence", type=float, default=0.05,
+                   help="Minimum window confidence to vote in the consensus (default: 0.05)")
+    p.add_argument("--full-mix", action="store_true", help="Use full mix (disable harmonic-only)")
+    p.add_argument("--url", help="YouTube URL (optional; metadata only)")
+    p.add_argument("--yt-api-key", default=None, help="YouTube Data API key (default: $YT_API_KEY)")
+    p.add_argument("--json-out", help="Also write the JSON to a file.")
+    p.set_defaults(func=cmd_key_window)
 
     p = sub.add_parser("events", help="Structural events (stem mode when stems exist, else feature mode)")
     _grid_args(p)

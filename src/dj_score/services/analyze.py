@@ -109,3 +109,21 @@ def analyze_rhythm(audio_path: Path, loader: AudioLoader, bpm: float, first_down
     bars = rhythm.rigid_bars(len(y) / sr, bpm, first_downbeat)
     per_bar = rhythm.classify_rhythm(y, sr, bars, 60.0 / bpm)
     return RhythmReport(rhythm.summarize_rhythm(per_bar), rhythm.summarize_rhythm_sections(per_bar, bars), per_bar)
+
+
+def key_window(audio_path: Path, loader: AudioLoader, sr=22050, start=90.0, duration=120.0,
+               use_harmonic=True) -> key.WindowKey:
+    """Key of one window: camelot_from_youtube's default mode."""
+    return key.window_key(loader.load_window(audio_path, sr, start, duration), sr, start, duration, use_harmonic)
+
+
+def key_consensus(audio_path: Path, loader: AudioLoader, starts: list[float], sr=22050, window=120.0,
+                  use_harmonic=True, min_conf=0.05) -> tuple[key.Consensus, list[key.WindowKey]]:
+    """Strict consensus over windows at `starts` -> (consensus, windows)."""
+    windows = [key_window(audio_path, loader, sr, s, window, use_harmonic) for s in starts]
+    return key.strict_consensus(windows, min_conf), windows
+
+
+def bar_starts(bpm: float, bar_start: int, bar_step: int, num_windows: int, beats_per_bar=4.0) -> list[float]:
+    """Window starts every `bar_step` bars from `bar_start`, in seconds."""
+    return [round((bar_start + i * bar_step) * beats_per_bar * 60.0 / bpm, 3) for i in range(num_windows)]

@@ -23,6 +23,10 @@ class AudioLoader(Protocol):
 
     def load(self, path: Path, sr: int) -> np.ndarray: ...
 
+    def load_window(self, path: Path, sr: int, start: float, duration: float) -> np.ndarray:
+        """`duration` seconds from `start`."""
+        ...
+
 
 class LufsMeter(Protocol):
     """Integrated loudness (LUFS), or None when no meter is available. `adapters.loudness`."""

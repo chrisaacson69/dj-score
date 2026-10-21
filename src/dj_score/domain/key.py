@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import warnings
 from collections import Counter
+from dataclasses import dataclass
 
 import librosa
 import numpy as np
 
-from dj_score.domain.camelot import key_name, to_camelot
+from dj_score.domain.camelot import camelot_number, key_name, to_camelot
 from dj_score.domain.model import (
     DominantKey,
     KeyCandidate,
@@ -242,4 +243,106 @@ def compute_summary(segments: list[KeySegment], phrases: list[KeyPhrase], durati
         key_changes=changes,
         segment_count=len(segments),
         phrase_count=len(phrases),
+    )
+
+
+# -- window key and strict consensus (camelot_from_youtube) -------------------------
+
+@dataclass
+class WindowCandidate:
+    score: float
+    tonic: str
+    mode: str
+
+
+@dataclass
+class WindowKey:
+    """Key of one analysis window, in camelot_from_youtube's JSON shape. A window too
+    short to analyse carries only `start`, `duration` and `error`."""
+    start: float
+    duration: float
+    key: str | None = None
+    camelot: str | None = None
+    confidence: float | None = None
+    score: float | None = None
+    top_candidates: list[WindowCandidate] | None = None
+    error: str | None = None
+
+
+def window_key(y, sr, start, duration, use_harmonic=True) -> WindowKey:
+    """Whole-window key estimate (window needs >= 5 s of audio)."""
+    if y is None or len(y) < sr * 5:
+        return WindowKey(float(start), float(duration), error="Window too short or failed to load.")
+    if use_harmonic:
+        y = librosa.effects.harmonic(y)
+    est = estimate_key(_normalize(librosa.feature.chroma_cqt(y=y, sr=sr).mean(axis=1)))
+    return WindowKey(
+        start=float(start),
+        duration=float(duration),
+        key=est.key_name,
+        camelot=est.camelot,
+        confidence=est.confidence,
+        score=est.score,
+        top_candidates=[WindowCandidate(c.score, *c.key.split(" ")) for c in est.top_candidates],
+    )
+
+
+@dataclass
+class ExactVote:
+    camelot: str
+    key: str
+    stability: float
+    counts: dict[str, int]
+
+
+@dataclass
+class FamilyVote:
+    camelot_number: int
+    representative: dict[str, str]
+    """{"camelot": ..., "key": ...} of the best window in the winning family."""
+    stability: float
+    counts: dict[str, int]
+
+
+@dataclass
+class Consensus:
+    min_confidence: float | None = None
+    fallback_used: bool | None = None
+    windows_used: int = 0
+    exact: ExactVote | None = None
+    family: FamilyVote | None = None
+    error: str | None = None
+
+
+def strict_consensus(windows: list[WindowKey], min_conf: float) -> Consensus:
+    """Vote over windows with confidence >= `min_conf` (falling back to the single most
+    confident window when none qualify), on the exact Camelot code and on its wheel
+    number (the "family", A and B together)."""
+    valid = [w for w in windows if w.camelot and w.confidence is not None]
+    if not valid:
+        return Consensus(error="No valid windows produced a Camelot result.", windows_used=0)
+
+    def rank(w):
+        return float(w.confidence), float(w.score)
+
+    used = [w for w in valid if float(w.confidence) >= float(min_conf)]
+    fallback_used = not used
+    if fallback_used:
+        used = [max(valid, key=lambda w: (float(w.confidence or 0.0), float(w.score or 0.0)))]
+
+    camelot_counts = Counter(w.camelot for w in used)
+    best_camelot, best_count = camelot_counts.most_common(1)[0]
+    num_counts = Counter(n for n in (camelot_number(w.camelot) for w in used) if n is not None)
+    best_num, best_num_count = num_counts.most_common(1)[0]
+
+    best_exact = max((w for w in used if w.camelot == best_camelot), key=rank)
+    best_family = max((w for w in used if camelot_number(w.camelot) == best_num), key=rank)
+
+    return Consensus(
+        min_confidence=float(min_conf),
+        fallback_used=fallback_used,
+        windows_used=len(used),
+        exact=ExactVote(best_camelot, best_exact.key, round(best_count / len(used), 3), dict(camelot_counts)),
+        family=FamilyVote(best_num, {"camelot": best_family.camelot, "key": best_family.key},
+                          round(best_num_count / len(used), 3), {str(k): v for k, v in num_counts.items()}),
     )

@@ -200,3 +200,55 @@ def test_stems_check(camelot, tmp_path):
     new = _ours(["stems", "check", *dirs, "--csv", str(cb)])
     assert new == old
     assert cb.read_text() == ca.read_text()
+
+
+KEY_WINDOW_CASES = [
+    ["--start", "10", "--duration", "40"],
+    ["--start", "70", "--duration", "40"],                           # runs past the end: error window
+    ["--start", "10", "--duration", "40", "--full-mix"],
+    ["--consensus", "--starts", "5,25,45", "--window", "30"],
+    ["--consensus", "--start", "5", "--window", "30", "--num-windows", "3"],     # fallback rolling
+    ["--consensus", "--bpm", "132.5", "--bar-start", "2", "--bar-step", "8", "--num-windows", "3",
+     "--window", "20", "--min-confidence", "0.9"],                  # bars, and a strict threshold
+]
+
+
+@pytest.mark.parametrize("extra", KEY_WINDOW_CASES, ids=lambda a: " ".join(a)[:40])
+def test_key_window(camelot, extra):
+    audio = str(Path(CAMELOT_DIR) / "NL123D.wav")
+    old = json.loads(_camelot(camelot, "camelot_from_youtube", ["--audio", audio, *extra]))
+    new = json.loads(_ours(["key-window", audio, *extra]))
+    assert new == old
+
+
+def test_consensus_edge_cases(camelot):
+    from dj_score.domain import key
+    from conftest import encode
+    cfy = camelot("camelot_from_youtube")
+    w = lambda c, conf, s=0.8: key.WindowKey(0, 30, key="A minor", camelot=c, confidence=conf, score=s,
+                                              top_candidates=[])
+    cases = [[], [key.WindowKey(0, 30, error="x")], [w("8A", 0.01), w("8B", 0.02, 0.9)],
+             [w("8A", 0.5), w("8B", 0.6), w("9A", 0.7)], [w("8A", 0.5), w("8A", 0.6), w("1B", 0.9)]]
+    for windows in cases:
+        for min_conf in (0.05, 0.55):
+            old = cfy.strict_consensus([encode(x) for x in windows], min_conf)
+            assert encode(key.strict_consensus(windows, min_conf)) == old
+
+
+def test_youtube_ids(camelot):
+    from dj_score.adapters.youtube import extract_youtube_id
+    cfy = camelot("camelot_from_youtube")
+    for url in ["https://youtu.be/abc123", "https://www.youtube.com/watch?v=xyz&t=5", "https://youtube.com/shorts/s1",
+                "https://www.youtube.com/embed/e9?x", "https://example.com/watch?v=no", "not a url", ""]:
+        assert extract_youtube_id(url) == cfy.extract_youtube_id(url)
+
+
+def test_key_window_bpm_auto_uses_the_grid():
+    """Deliberate change: camelot's --bpm auto ran its own (retired) 60 s tracker."""
+    from dj_score.services.analyze import bar_starts, detect_beats
+    audio = Path(CAMELOT_DIR) / "NL123D.wav"
+    r = json.loads(_ours(["key-window", str(audio), "--consensus", "--bpm", "auto", "--bar-start", "2",
+                          "--bar-step", "8", "--num-windows", "2", "--window", "20"]))
+    tempo = detect_beats(audio, LibrosaLoader(), sr=22050)[1].grid.tempo
+    assert r["bpm_detection"]["bpm"] == tempo and "dj-score beat grid" in r["bpm_detection"]["detected_from"]
+    assert r["analysis"]["starts"] == bar_starts(tempo, 2, 8, 2) and r["analysis"]["generated_from"] == "bpm/bars (auto-detected)"
