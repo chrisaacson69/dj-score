@@ -41,7 +41,7 @@ def _camelot(camelot, module, argv):
         try:
             if module == "rhythm_detect":  # its CLI lives under `if __name__ == "__main__"`
                 import runpy
-                runpy.run_path(str(Path(CAMELOT_DIR) / "rhythm_detect.py"), run_name="__main__")
+                runpy.run_path(mod.__file__, run_name="__main__")
             else:
                 mod.main()
         finally:

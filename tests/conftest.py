@@ -4,10 +4,15 @@ Oracle tests run camelot's original function and the dj-score conversion on the
 same input and require identical output. They need a camelot_from_youtube checkout
 at DJ_SCORE_CAMELOT_DIR (and its module-level deps, e.g. `pip install -e .[plots]`);
 without one they skip.
+
+Camelot's code is imported from its git history at CAMELOT_PRE_REPOINT, not from the
+working tree, so the originals can move to camelot's `archive/` without breaking the
+oracles. Its data (audio, caches) is still read from the checkout.
 """
 
 import importlib
 import importlib.util
+import io
 import os
 import sys
 from pathlib import Path
@@ -24,25 +29,29 @@ CAMELOT_CACHES = sorted(p.parent for p in Path(CAMELOT_DIR).glob("*/analysis_cac
 needs_camelot = pytest.mark.skipif(not CAMELOT_DIR, reason="DJ_SCORE_CAMELOT_DIR not set")
 
 
+# camelot's last commit before its UI moved onto dj-score: the code every oracle runs.
+CAMELOT_PRE_REPOINT = "150422a"
+
+
 @pytest.fixture(scope="session")
-def camelot():
-    """Import a camelot module by name: `camelot("key_detect")`."""
+def camelot(tmp_path_factory):
+    """Import a camelot module by name, as it was at CAMELOT_PRE_REPOINT: `camelot("key_detect")`."""
+    import subprocess
+    import tarfile
     if not CAMELOT_DIR:
         pytest.skip("DJ_SCORE_CAMELOT_DIR not set")
-    root = str(Path(CAMELOT_DIR).resolve())
-    if root not in sys.path:
-        sys.path.insert(0, root)
+    tree = tmp_path_factory.mktemp(f"camelot_{CAMELOT_PRE_REPOINT}")
+    tar = subprocess.run(["git", "-C", str(Path(CAMELOT_DIR).resolve()), "archive", "--format=tar",
+                          CAMELOT_PRE_REPOINT], capture_output=True, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(tar)) as t:
+        t.extractall(tree, filter="data")
+    sys.path.insert(0, str(tree))
     return importlib.import_module
 
 
 def encode(value):
     """A dj-score result in the plain JSON shape camelot's dicts have."""
     return to_plain(value)
-
-
-# camelot's last commit before its UI moved onto dj-score. Modules that have since been
-# repointed (audio_ui) are compared at this revision, not the working copy.
-CAMELOT_PRE_REPOINT = "150422a"
 
 
 @pytest.fixture(scope="session")
