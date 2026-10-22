@@ -17,6 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
+from dj_score.adapters import library
+
 
 @dataclass
 class Separation:
@@ -48,7 +50,7 @@ class DemucsSeparator:
         self.float_output = float_output
 
     def separate(self, audio_path: Path, output_dir: Path | None = None) -> dict[str, Path]:
-        """Write one file per source into `output_dir` (default `<audio>_stems/`) plus
+        """Write one file per source into `output_dir` (default: the track's stems folder, `library.stems_dir`) plus
         `separation_info.json`; returns {source: path}."""
         import torch
         from demucs.apply import apply_model
@@ -58,7 +60,7 @@ class DemucsSeparator:
         audio_path = Path(audio_path)
         if not audio_path.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
-        output_dir = Path(output_dir) if output_dir else audio_path.parent / f"{audio_path.stem}_stems"
+        output_dir = Path(output_dir) if output_dir else library.stems_dir(audio_path)
         output_dir.mkdir(parents=True, exist_ok=True)
         device = self.device or pick_device()
 

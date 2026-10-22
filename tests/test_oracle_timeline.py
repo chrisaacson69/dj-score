@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from conftest import CAMELOT_DIR, encode, needs_camelot
+from conftest import encode, music, needs_camelot
 from dj_score.adapters.audio import LibrosaLoader
 from dj_score.adapters.plots import timeline as views
 from dj_score.cli import reports
@@ -29,7 +29,7 @@ def camelot_timeline(camelot, tmp_path_factory):
     out = tmp_path_factory.mktemp("tl") / "timeline.json"
     cfy = camelot("camelot_from_youtube")
     old_argv = sys.argv
-    sys.argv = ["camelot_from_youtube.py", "--audio", str(Path(CAMELOT_DIR) / "NL123D.wav"), "--timeline",
+    sys.argv = ["camelot_from_youtube.py", "--audio", str(music("NL123D.wav")), "--timeline",
                 "--json-out", str(out)]
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -75,7 +75,7 @@ def test_merge_absorbs_blips_and_types_regions(camelot):
 
 def test_energy_profile(camelot):
     cfy = camelot("camelot_from_youtube")
-    y = LibrosaLoader().load(Path(CAMELOT_DIR) / "NL123D.wav", 22050)
+    y = LibrosaLoader().load(music("NL123D.wav"), 22050)
     for a, b in ((0, 10), (20, 35), (60, 61.5)):
         clip = y[int(a * 22050):int(b * 22050)]
         assert encode(timeline.energy_profile(clip, 22050)) == cfy.analyze_energy_segment(clip, 22050)
@@ -114,7 +114,7 @@ def test_dj_score_timeline_end_to_end(tmp_path):
     key is window_key on its slice, events and views render."""
     from test_oracle_cli import _ours
     from dj_score.domain.key import window_key
-    audio = Path(CAMELOT_DIR) / "NL123D.wav"
+    audio = music("NL123D.wav")
     out = tmp_path / "t.json"
     text = _ours(["timeline", str(audio), "--json-out", str(out), "--plot", "both", "--plot-save", str(tmp_path / "v")])
     data = json.loads(out.read_text(encoding="utf-8"))

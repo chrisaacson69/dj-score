@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from conftest import CAMELOT_DIR, needs_camelot
+from conftest import analysis, music, needs_camelot
 from dj_score.adapters.audio import LibrosaLoader
 from dj_score.cli import main as dj_main
 from dj_score.domain.beatgrid import detect_grid
@@ -67,7 +67,7 @@ def _cut(src, dst, start, seconds):
 
 def _phase0_excerpt(tmp, name, seconds=60, stems_dir=None):
     """An excerpt of `name` (and its stems) starting where the detected downbeat phase is 0."""
-    src = Path(CAMELOT_DIR) / name
+    src = music(name)
     for start in np.arange(30.0, 34.0, 0.25):
         clip = _cut(src, tmp / f"clip{Path(name).suffix if src.suffix == '.wav' else '.wav'}", start, seconds)
         y = LibrosaLoader().load(clip, 44100)
@@ -75,7 +75,7 @@ def _phase0_excerpt(tmp, name, seconds=60, stems_dir=None):
             if stems_dir:
                 out = tmp / "clip_stems"
                 out.mkdir(exist_ok=True)
-                for w in (Path(CAMELOT_DIR) / stems_dir).glob("*.wav"):
+                for w in analysis(stems_dir).glob("*.wav"):
                     _cut(w, out / w.name, start, seconds)
             return clip
     pytest.skip(f"no phase-0 offset found in {name}")
@@ -166,7 +166,7 @@ def test_export(camelot, tmp_path):
 
 
 def test_stems_probe(camelot, tmp_path):
-    clip = _cut(Path(CAMELOT_DIR) / "Waves_stems" / "vocals.wav", tmp_path / "vocals.wav", 60, 20)
+    clip = _cut(analysis("Waves_stems") / "vocals.wav", tmp_path / "vocals.wav", 60, 20)
     ja, jb = tmp_path / "old.json", tmp_path / "new.json"
     old = _camelot(camelot, "analyze_stems", ["--audio", str(clip), "--output", str(ja)])
     new = _ours(["stems", "probe", "--audio", str(clip), "--output", str(jb)])
@@ -215,7 +215,7 @@ KEY_WINDOW_CASES = [
 
 @pytest.mark.parametrize("extra", KEY_WINDOW_CASES, ids=lambda a: " ".join(a)[:40])
 def test_key_window(camelot, extra):
-    audio = str(Path(CAMELOT_DIR) / "NL123D.wav")
+    audio = str(music("NL123D.wav"))
     old = json.loads(_camelot(camelot, "camelot_from_youtube", ["--audio", audio, *extra]))
     new = json.loads(_ours(["key-window", audio, *extra]))
     assert new == old
@@ -246,7 +246,7 @@ def test_youtube_ids(camelot):
 def test_key_window_bpm_auto_uses_the_grid():
     """Deliberate change: camelot's --bpm auto ran its own (retired) 60 s tracker."""
     from dj_score.services.analyze import bar_starts, detect_beats
-    audio = Path(CAMELOT_DIR) / "NL123D.wav"
+    audio = music("NL123D.wav")
     r = json.loads(_ours(["key-window", str(audio), "--consensus", "--bpm", "auto", "--bar-start", "2",
                           "--bar-step", "8", "--num-windows", "2", "--window", "20"]))
     tempo = detect_beats(audio, LibrosaLoader(), sr=22050)[1].grid.tempo
@@ -274,7 +274,7 @@ def test_pair_collision_matches_compare(camelot, bars, gap):
 
 def test_pair_alignment_is_compare_one_bar_later(camelot):
     """1-based bars: dj-score's "9-25"/"5-21" are camelot --compare's 0-based "8-24"/"4-20"."""
-    a, b = (str(Path(CAMELOT_DIR) / n) for n in ("NL123D.wav", "NothingLeft1+2_bar400-bar445.wav"))
+    a, b = (str(music(n)) for n in ("NL123D.wav", "NothingLeft1+2_bar400-bar445.wav"))
     beats = ["--first-beat-a", "1000", "--first-beat-b", "2500"]
     old = json.loads(_camelot(camelot, "camelot_from_youtube", ["--compare", "--audio-a", a, "--audio-b", b,
                                                                 "--bars-a", "8-24", "--bars-b", "4-20",

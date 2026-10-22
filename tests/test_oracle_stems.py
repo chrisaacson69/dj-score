@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conftest import CAMELOT_DIR, encode, needs_camelot
+from conftest import analysis, encode, music, needs_camelot
 
 pytest.importorskip("demucs")
 from dj_score.adapters.audio import LibrosaLoader  # noqa: E402
@@ -32,11 +32,10 @@ SEPARATIONS = [("Waves_stems", "Waves.mp3"), ("NothingLeftBreeder_stems", "Nothi
 def _relocated(tmp_path, folder, audio):
     """A copy of a camelot stem folder whose separation_info.json points at where things
     are now (camelot's records the repo's old location). camelot's files are not touched."""
-    root = Path(CAMELOT_DIR).resolve()
     dst = tmp_path / folder
-    shutil.copytree(root / folder, dst)
+    shutil.copytree(analysis(folder), dst)
     info = json.loads((dst / "separation_info.json").read_text())
-    info["input"] = str(root / audio)
+    info["input"] = str(music(audio).resolve())
     info["stems"] = {k: str(dst / Path(v).name) for k, v in info["stems"].items()}
     (dst / "separation_info.json").write_text(json.dumps(info, indent=2))
     return dst
@@ -85,7 +84,7 @@ def _excerpt(src, dst, start_s, seconds):
 @pytest.mark.parametrize("stem", ["vocals", "bass", "drums", "other"])
 def test_vocal_probe(camelot, tmp_path, stem):
     an = camelot("analyze_stems")
-    clip = _excerpt(Path(CAMELOT_DIR) / "Waves_stems" / f"{stem}.wav", tmp_path / f"{stem}.wav", 60, 25)
+    clip = _excerpt(analysis("Waves_stems") / f"{stem}.wav", tmp_path / f"{stem}.wav", 60, 25)
     old = an.analyze_vocal_likelihood(str(clip))
     old.pop("file")
     new = stems.vocal_probe(LibrosaLoader().load(clip, 22050), 22050)
@@ -95,7 +94,7 @@ def test_vocal_probe(camelot, tmp_path, stem):
 def test_probe_reaches_several_classes(camelot, tmp_path):
     classes = set()
     for stem in ("vocals", "bass", "drums", "other"):
-        clip = _excerpt(Path(CAMELOT_DIR) / "Waves_stems" / f"{stem}.wav", tmp_path / f"{stem}.wav", 60, 25)
+        clip = _excerpt(analysis("Waves_stems") / f"{stem}.wav", tmp_path / f"{stem}.wav", 60, 25)
         classes.add(stems.vocal_probe(LibrosaLoader().load(clip, 22050), 22050).classification)
     assert len(classes) >= 2, classes
 
@@ -105,7 +104,7 @@ def test_separation(camelot, tmp_path):
     """Both separators on the same 8 s clip, CPU, same seed: identical stems."""
     import soundfile as sf
     import torch
-    clip = _excerpt(Path(CAMELOT_DIR) / "NL123D.wav", tmp_path / "clip.wav", 20, 8)
+    clip = _excerpt(music("NL123D.wav"), tmp_path / "clip.wav", 20, 8)
     outs = {}
     for side, run in (("old", lambda o: camelot("separate_stems").separate_audio(str(clip), str(o), device="cpu")),
                       ("new", lambda o: DemucsSeparator(device="cpu").separate(clip, o))):

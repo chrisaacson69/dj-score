@@ -628,7 +628,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                                                       metavar="ACTION")
     p = stems.add_parser("separate", help="Separate audio into stems with Demucs (stems extra)")
     p.add_argument("--audio", "-a", required=True, help="Path to input audio file")
-    p.add_argument("--output-dir", "-o", help="Output directory for stems (default: <audio>_stems/)")
+    p.add_argument("--output-dir", "-o", help="Output directory for stems (default: <name>_stems/ in the library's analysis/ folder, else beside the audio)")
     p.add_argument("--model", "-m", default="htdemucs",
                    choices=["htdemucs", "htdemucs_ft", "htdemucs_6s", "mdx_extra", "mdx_extra_q"],
                    help="Demucs model to use (default: htdemucs)")

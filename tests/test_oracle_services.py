@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conftest import CAMELOT_DIR, encode, needs_camelot
+from conftest import encode, music, needs_camelot
+from dj_score.adapters import library
 from dj_score.adapters import cache_store
 from dj_score.adapters.audio import LibrosaLoader
 from dj_score.adapters.loudness import PyloudnormMeter
@@ -35,7 +36,7 @@ def _camelot_run_bpm(bd, path, beats_per_bar=4, hop_length=512):
 @pytest.fixture(scope="module", params=AUDIO)
 def both(request, camelot, camelot_at):
     """(camelot AnalysisStore after store_bpm, dj-score TrackAnalysis) for one track."""
-    path = Path(CAMELOT_DIR) / request.param
+    path = music(request.param)
     if not path.exists():
         pytest.skip(f"{path.name} not present")
     store = camelot_at("audio_ui").AnalysisStore()  # the pre-repoint store
@@ -120,7 +121,8 @@ def test_quantization_report(camelot):
 def _camelot_run_events(ed, s, audio_path, phrase_bars=4):
     """Verbatim body of camelot's `_run_events.do`."""
     import librosa as _lr
-    stems_dir, stem_paths = ed.find_or_create_stems(str(audio_path))
+    # camelot looked beside the audio; the library keeps stems under analysis/, so pass them
+    stems_dir, stem_paths = ed.find_or_create_stems(str(audio_path), stems_dir=library.stems_dir(audio_path))
     if stem_paths:
         se = {}
         for sn, sp in stem_paths.items():
@@ -150,10 +152,10 @@ def _camelot_run_events(ed, s, audio_path, phrase_bars=4):
 def test_analyze_events(both, tmp_path, camelot):
     from dj_score.adapters.stems import StemFolder
     store, a = both
-    path = Path(CAMELOT_DIR) / a.audio_name
+    path = music(a.audio_name)
     store.store_events(_camelot_run_events(camelot("event_detect"), store, path))
     a.events = analyze.analyze_events(a, path, StemFolder(), LibrosaLoader())
-    assert a.events.event_mode == ("stems" if (path.parent / f"{path.stem}_stems").exists() else "features")
+    assert a.events.event_mode == ("stems" if library.stems_dir(path).exists() else "features")
     assert a.events.events, "no events: the comparison would be vacuous"
     if a.events.event_mode == "features":
         assert {e.pass_ for e in a.events.events} == {1, 2}, "both detector passes must be exercised"
@@ -166,5 +168,5 @@ def test_analyze_events(both, tmp_path, camelot):
 
 def test_both_event_modes_covered(both):
     """The fixture's tracks must include one stems and one features track."""
-    names = {p for p in AUDIO if (Path(CAMELOT_DIR) / f"{Path(p).stem}_stems").exists()}
+    names = {p for p in AUDIO if library.stems_dir(music(p)).exists()}
     assert names and names != set(AUDIO)

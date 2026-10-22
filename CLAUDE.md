@@ -27,8 +27,12 @@ Install into a consumer's env: `pip install -e ../dj-score[plots,loudness,rekord
 re-derive a function that exists in camelot; convert it. Never fold a near-duplicate without diffing it.
 **This repo is code only**: fixtures and all generated data are gitignored and regenerated locally
 (`tests/fixtures/make_golden.py`). **Nothing is purged**: retired camelot tools and their outputs move to
-camelot's `archive/`. Set `DJ_SCORE_CAMELOT_DIR=../camelot_from_youtube` to also run the golden tests over
-every real cache there. Camelot's UI env is its `env1` (the only one with matplotlib + pygame).
+camelot's `archive/`. **Data lives in the music library** (sibling `../music`, local only, never pushed:
+commercial audio): originals at its top level, each track's derived files under `analysis/<name>/` and
+`analysis/<name>_stems/`. `adapters/library` is the one place that layout is known; every tool resolves through
+it, and audio outside a library keeps the old beside-the-audio layout. To run the oracles set
+`DJ_SCORE_MUSIC=../music` (data) and `DJ_SCORE_CAMELOT_DIR=../camelot_from_youtube` (camelot's git history, the
+oracle code). Camelot's UI env is its `env1` (the only one with matplotlib + pygame).
 **Oracle tests** (`tests/test_oracle_*.py`) import camelot's original and require identical output; a conversion
 isn't done until it has one. Mutation-check them with `python -B`: a same-size edit restored within the same
 second leaves stale `.pyc` running (reproduced 2026-10-21).

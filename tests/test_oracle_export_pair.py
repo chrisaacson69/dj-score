@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conftest import CAMELOT_CACHES, CAMELOT_DIR, needs_camelot
+from conftest import CAMELOT_CACHES, music, needs_camelot
 from dj_score.adapters import cache_store
 from dj_score.adapters.audio import LibrosaLoader
 from dj_score.adapters.rekordbox_xml import RekordboxXml, build_track
@@ -159,7 +159,7 @@ def test_align_pair(camelot):
     indices those bars mean, + alignment_to_json."""
     import librosa
     al = camelot("alignment")
-    pa, pb = (Path(CAMELOT_DIR) / n for n in ("NL123D.wav", "NothingLeft1+2_bar400-bar445.wav"))
+    pa, pb = (music(n) for n in ("NL123D.wav", "NothingLeft1+2_bar400-bar445.wav"))
     sr, bpm, fa, fb, bars_a, bars_b = 44100, 132.5, 1000, 2500, "8-24", "4-20"
     y_a, _ = librosa.load(str(pa), sr=sr, mono=True)
     y_b, _ = librosa.load(str(pb), sr=sr, mono=True)

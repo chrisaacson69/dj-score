@@ -7,7 +7,8 @@ without one they skip.
 
 Camelot's code is imported from its git history at CAMELOT_PRE_REPOINT, not from the
 working tree, so the originals can move to camelot's `archive/` without breaking the
-oracles. Its data (audio, caches) is still read from the checkout.
+oracles. The data (audio, analysis caches, stems) comes from the music library at
+DJ_SCORE_MUSIC (see `adapters/library`).
 """
 
 import importlib
@@ -20,13 +21,28 @@ from pathlib import Path
 import matplotlib
 import pytest
 
+from dj_score.adapters import library
 from dj_score.domain.codec import to_plain
 
 matplotlib.use("Agg")
 
 CAMELOT_DIR = os.environ.get("DJ_SCORE_CAMELOT_DIR")
-CAMELOT_CACHES = sorted(p.parent for p in Path(CAMELOT_DIR).glob("*/analysis_cache.json")) if CAMELOT_DIR else []
-needs_camelot = pytest.mark.skipif(not CAMELOT_DIR, reason="DJ_SCORE_CAMELOT_DIR not set")
+MUSIC_DIR = os.environ.get("DJ_SCORE_MUSIC")
+CAMELOT_CACHES = library.projects(MUSIC_DIR) if MUSIC_DIR else []
+if MUSIC_DIR and not CAMELOT_CACHES:  # parametrized oracles would pass with no cases
+    raise RuntimeError(f"no analysed tracks under {MUSIC_DIR}/{library.ANALYSIS}")
+needs_camelot = pytest.mark.skipif(not (CAMELOT_DIR and MUSIC_DIR),
+                                   reason="DJ_SCORE_CAMELOT_DIR and DJ_SCORE_MUSIC not both set")
+
+
+def music(name):
+    """An original in the music library."""
+    return Path(MUSIC_DIR) / name
+
+
+def analysis(name):
+    """A folder under the library's analysis/ (a project, or `<track>_stems`)."""
+    return Path(MUSIC_DIR) / library.ANALYSIS / name
 
 
 # camelot's last commit before its UI moved onto dj-score: the code every oracle runs.
@@ -71,6 +87,9 @@ def camelot_at(camelot, tmp_path_factory):
             spec = importlib.util.spec_from_file_location(f"{module}_{rev}", path)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
+            # the old audio_ui selects TkAgg on import; keep the session headless
+            import matplotlib.pyplot as plt
+            plt.switch_backend("Agg")
             cache[(module, rev)] = mod
         return cache[(module, rev)]
     return load

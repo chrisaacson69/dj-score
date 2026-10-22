@@ -1,10 +1,11 @@
-"""Regenerate the golden fixtures from a camelot_from_youtube checkout.
+"""Regenerate the golden fixtures from a camelot_from_youtube checkout and the music library.
 
-    python tests/fixtures/make_golden.py ../camelot_from_youtube
+    python tests/fixtures/make_golden.py ../camelot_from_youtube ../music
 
 Copies each chosen track's `analysis_cache.json` verbatim and its `.npz` minus the
 full signal `y` (no audio enters this repo), and converts the hand-labelled
 `KNOWN_EVENTS` table out of `analyze_onset_drops.py` (read with `ast`, not run).
+Both label tools are in camelot's `archive/` since 2026-10-22.
 """
 
 import ast
@@ -15,7 +16,10 @@ from pathlib import Path
 
 import numpy as np
 
+from dj_score.adapters.library import ANALYSIS
+
 HERE = Path(__file__).parent
+LABELS = Path("archive/analyze_onset_drops/analyze_onset_drops.py")
 
 # slug -> camelot project dir; chosen to cover the schema variants
 TRACKS = {
@@ -25,21 +29,21 @@ TRACKS = {
 }
 
 
-def main(camelot_dir):
-    root = Path(camelot_dir)
+def main(camelot_dir, music_dir):
+    root, music = Path(camelot_dir), Path(music_dir)
     for slug, name in TRACKS.items():
-        src, dst = root / name, HERE / "golden" / slug
+        src, dst = music / ANALYSIS / name, HERE / "golden" / slug
         dst.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src / "analysis_cache.json", dst / "analysis_cache.json")
         with np.load(src / "analysis_cache.npz", allow_pickle=False) as z:
             np.savez_compressed(dst / "analysis_cache.npz", **{k: z[k] for k in z.files if k != "y"})
         print(f"  {slug:12} <- {name}")
 
-    tree = ast.parse((root / "analyze_onset_drops.py").read_text(encoding="utf-8"))
+    tree = ast.parse((root / LABELS).read_text(encoding="utf-8"))
     (known,) = [ast.literal_eval(n.value) for n in tree.body
                 if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", None) == "KNOWN_EVENTS"]
     events = [{"bar": int(k.split("_")[1]), **v} for k, v in known.items()]
-    for e, t in zip(events, label_times(root, [e["bar"] for e in events])):
+    for e, t in zip(events, label_times(root, music, [e["bar"] for e in events])):
         e["time"] = round(t, 2)
     with open(HERE / "breeder_known_events.json", "w", encoding="utf-8") as f:
         json.dump({"track": "NothingLeftBreeder.wav", "source": "camelot analyze_onset_drops.KNOWN_EVENTS",
@@ -48,7 +52,7 @@ def main(camelot_dir):
     print(f"  breeder_known_events.json <- {len(events)} events")
 
 
-def label_times(root, bars):
+def label_times(root, music, bars):
     """The labels' bars are on `visualize_audio`'s grid (the plots they were read from).
     Rebuild that grid and check it against the timestamps written into the labels.
     It is not dj-score's grid: librosa's first beat on this track is at 3.0 s, and
@@ -56,13 +60,13 @@ def label_times(root, bars):
     import re
 
     import librosa
-    sys.path.insert(0, str(root))
+    sys.path.insert(0, str(root / "archive" / "visualize_audio"))
     import visualize_audio
 
-    y, sr = librosa.load(root / "NothingLeftBreeder.wav", sr=22050, mono=True)
+    y, sr = librosa.load(music / "NothingLeftBreeder.wav", sr=22050, mono=True)
     g = visualize_audio.detect_beats_and_downbeat(y, sr)
     times = [float(g["beat_times"][b * 4 + g["first_downbeat_idx"]]) for b in bars]
-    tree = ast.parse((root / "analyze_onset_drops.py").read_text(encoding="utf-8"))
+    tree = ast.parse((root / LABELS).read_text(encoding="utf-8"))
     (known,) = [ast.literal_eval(n.value) for n in tree.body
                 if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", None) == "KNOWN_EVENTS"]
     stamps = {int(k.split("_")[1]): re.search(r"\((\d+):(\d\d)\)", v["description"]) for k, v in known.items()}
@@ -77,4 +81,4 @@ def label_times(root, bars):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2])

@@ -1,8 +1,8 @@
 """Golden tests: dj-score reads camelot's caches and writes them back unchanged.
 
 Fixtures are data, so they are not in the repo: generate them locally with
-`python tests/fixtures/make_golden.py ../camelot_from_youtube`. Set DJ_SCORE_CAMELOT_DIR
-to that checkout to also run every real cache there (full `y` included).
+`python tests/fixtures/make_golden.py ../camelot_from_youtube ../music`. Set DJ_SCORE_MUSIC
+to the music library to also run every real cache there (full `y` included).
 """
 
 import json
@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dj_score.adapters import cache_store
+from dj_score.adapters import cache_store, library
 from dj_score.adapters.cache_store import CacheSchemaError, CacheStore
 from dj_score.domain.model import LEGACY_GRID_SOURCE
 from dj_score.ports import AnalysisCache
@@ -22,8 +22,8 @@ GOLDEN = Path(__file__).parent / "fixtures" / "golden"
 FIXTURES = sorted(p for p in GOLDEN.iterdir() if p.is_dir()) if GOLDEN.exists() else []
 needs_golden = pytest.mark.skipif(not FIXTURES, reason="golden fixtures not generated (see module docstring)")
 
-CAMELOT = os.environ.get("DJ_SCORE_CAMELOT_DIR")
-LOCAL = sorted(p.parent for p in Path(CAMELOT).glob("*/analysis_cache.json")) if CAMELOT else []
+MUSIC = os.environ.get("DJ_SCORE_MUSIC")
+LOCAL = library.projects(MUSIC) if MUSIC else []
 
 
 def _strip_nulls(v):
@@ -63,7 +63,7 @@ def test_golden_round_trip(src, tmp_path):
     _assert_round_trip(src, tmp_path)
 
 
-@pytest.mark.skipif(not CAMELOT, reason="DJ_SCORE_CAMELOT_DIR not set")
+@pytest.mark.skipif(not MUSIC, reason="DJ_SCORE_MUSIC not set")
 @pytest.mark.parametrize("src", LOCAL, ids=lambda p: p.name)
 def test_local_camelot_round_trip(src, tmp_path):
     _assert_round_trip(src, tmp_path)
