@@ -7,7 +7,8 @@ Vault pointer: `Vault/projects/dj-score/README.md`. Design source: `Vault/resear
 
 The **one shared library** for DJ track analysis. Two apps depend on it and hold no analysis code of their own:
 - `camelot-from-youtube` — the Tk UI (and per-track data). Source specimen this library is extracted from.
-- `cyborgdj` — the renderer; its forked `scripts/{spectral_collision,export_rekordbox,analyze_track}.py` go away.
+- `cyborgdj` — the controller (its forks retired 2026-10-22). Rendering is the sibling library `../dj-render`,
+  which must never depend on this one: it takes grid results, not analysis code.
 
 Install into a consumer's env: `pip install -e ../dj-score[plots,loudness,rekordbox]`.
 
