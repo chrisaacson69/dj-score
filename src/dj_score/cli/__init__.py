@@ -48,9 +48,14 @@ def _track(args):
     path = _audio(args.audio)
     print(f"Loading {path.name} (sr={args.sr}, hop={args.hop_length})...", file=sys.stderr)
     a = analyze.analyze_track(path, bootstrap.loader(), bootstrap.meter(), sr=args.sr,
-                              hop_length=args.hop_length, beats_per_bar=args.beats_per_bar)
-    print(f"Detected {len(a.grid.beat_times)} beats (librosa tempo: {a.grid.tempo:.1f} BPM)", file=sys.stderr)
+                              hop_length=args.hop_length, beats_per_bar=args.beats_per_bar, grid=args.grid)
+    print(f"Detected {len(a.grid.beat_times)} beats ({_tempo_label(a.grid)} tempo: {a.grid.tempo:.1f} BPM)",
+          file=sys.stderr)
     return path, a
+
+
+def _tempo_label(grid):
+    return "librosa" if grid.source == "librosa-dp" else grid.source
 
 
 # -- commands -----------------------------------------------------------------------
@@ -61,9 +66,9 @@ def cmd_bpm(args):
     print(f"Loading {path.name} (sr={args.sr}, hop={args.hop_length})...", file=sys.stderr)
     y, det = analyze.detect_beats(path, bootstrap.loader(), sr=args.sr, hop_length=args.hop_length,
                                   beats_per_bar=args.beats_per_bar, span=args.span,
-                                  tolerance=args.tolerance, min_segment_bars=args.min_segment_bars)
+                                  tolerance=args.tolerance, min_segment_bars=args.min_segment_bars, grid=args.grid)
     grid = det.grid
-    print(f"Detected {len(grid.beat_times)} beats (librosa tempo: {grid.tempo:.1f} BPM)", file=sys.stderr)
+    print(f"Detected {len(grid.beat_times)} beats ({_tempo_label(grid)} tempo: {grid.tempo:.1f} BPM)", file=sys.stderr)
     if det.trim.bars_trimmed > 0:
         print(f"Trimmed {det.trim.bars_trimmed} silent intro bar(s) ({det.trim.beats_trimmed} beats) from beat grid",
               file=sys.stderr)
@@ -493,6 +498,8 @@ def _grid_args(p, sr=44100):
     p.add_argument("--sr", type=int, default=sr, help="Sample rate (default: 44100 for 11.6ms frame resolution)")
     p.add_argument("--hop-length", type=int, default=512, help="Hop length for beat tracker (default: 512)")
     p.add_argument("--beats-per-bar", type=int, default=4, help="Beats per bar (default: 4)")
+    p.add_argument("--grid", choices=["librosa-dp", "comb"], default="librosa-dp",
+                   help="Beat grid: librosa DP tracker (default) or the fixed-tempo comb grid")
 
 
 def _plot_args(p, json_out=True):

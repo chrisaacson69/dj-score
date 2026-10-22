@@ -15,24 +15,31 @@ import numpy as np
 from dj_score.domain import events, key, rhythm, spectral
 from dj_score.domain.audio import make_waveform, measure_loudness
 from dj_score.domain.beatgrid import GridDetection, detect_grid
-from dj_score.domain.model import EventAnalysis, KeyAnalysis, SpectrumAnalysis, StemActivity, TrackAnalysis
+from dj_score.domain.rigidgrid import COMB_GRID_SOURCE, detect_comb_grid
+from dj_score.domain.model import LEGACY_GRID_SOURCE, EventAnalysis, KeyAnalysis, SpectrumAnalysis, StemActivity, TrackAnalysis
 from dj_score.ports import AudioLoader, LufsMeter, StemSeparator, StemSource
 
 
+# Grid methods by `Beatgrid.source`: the librosa DP tracker (default) and the
+# fixed-tempo comb grid (ledger step 6; the default once it is scored on more tracks).
+GRIDS = {LEGACY_GRID_SOURCE: detect_grid, COMB_GRID_SOURCE: detect_comb_grid}
+
+
 def detect_beats(audio_path: Path, loader: AudioLoader, sr=44100, hop_length=512, beats_per_bar=4,
-                 span=8, tolerance=2.0, min_segment_bars=4) -> tuple[np.ndarray, GridDetection]:
+                 span=8, tolerance=2.0, min_segment_bars=4,
+                 grid=LEGACY_GRID_SOURCE) -> tuple[np.ndarray, GridDetection]:
     """Load audio and detect its grid, keeping the detection details. -> (signal, detection)"""
     y = loader.load(audio_path, sr)
-    return y, detect_grid(y, sr, hop_length=hop_length, beats_per_bar=beats_per_bar, span=span,
+    return y, GRIDS[grid](y, sr, hop_length=hop_length, beats_per_bar=beats_per_bar, span=span,
                           tolerance=tolerance, min_segment_bars=min_segment_bars)
 
 
 def analyze_track(audio_path: Path, loader: AudioLoader, meter: LufsMeter,
                   sr=44100, hop_length=512, beats_per_bar=4, span=8,
-                  tolerance=2.0, min_segment_bars=4) -> TrackAnalysis:
+                  tolerance=2.0, min_segment_bars=4, grid=LEGACY_GRID_SOURCE) -> TrackAnalysis:
     """Load audio, build the beat grid, measure loudness: camelot's "BPM" action."""
     y, detection = detect_beats(audio_path, loader, sr, hop_length, beats_per_bar, span,
-                                tolerance, min_segment_bars)
+                                tolerance, min_segment_bars, grid)
     return TrackAnalysis(
         sr=sr,
         duration=len(y) / sr,
